@@ -208,98 +208,306 @@ def _pair_replicates(group: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, b
     return rep1, rep2, colour_split
 
 
+def _replicate_bucket_key(row: pd.Series, use_marks: bool) -> str:
+    if use_marks:
+        return str(row.get("operator_mark") or row.get("File") or "unassigned")
+    return str(row.get("File") or row.name)
+
+
+def _split_replicate_buckets(group: pd.DataFrame) -> Tuple[List[Tuple[str, pd.DataFrame]], bool]:
+    marks_present = set(group["operator_mark"].dropna())
+    colour_split = bool(marks_present & _REP1_MARKS) and bool(marks_present & _REP2_MARKS)
+    unique_files = group["File"].dropna().astype(str).nunique()
+    use_marks = colour_split and unique_files <= 2
+
+    prepared = group.copy()
+    prepared["_replicate_bucket"] = prepared.apply(lambda row: _replicate_bucket_key(row, use_marks), axis=1)
+    buckets = []
+    for bucket_name, bucket_df in prepared.groupby("_replicate_bucket", sort=False):
+        buckets.append((str(bucket_name), bucket_df.drop(columns=["_replicate_bucket"])))
+    return buckets, use_marks
+
+
+def _candidate_distance(row_a: pd.Series, row_b: pd.Series, config: ScreeningConfig) -> tuple[bool, Dict[str, float]]:
+    rt_delta = abs(float(row_a["RT"]) - float(row_b["RT"]))
+    mz_delta_da = abs(float(row_a["Base Peak"]) - float(row_b["Base Peak"]))
+    mz_delta_ppm = _ppm_delta(float(row_a["Base Peak"]), float(row_b["Base Peak"]))
+    mz_delta_in_mode = _mz_delta(float(row_a["Base Peak"]), float(row_b["Base Peak"]), config.replicate_mz_mode)
+    matches = rt_delta <= config.replicate_rt_tol and mz_delta_in_mode <= config.replicate_mz_tol
+    distance = _fraction_of_tol(rt_delta, config.replicate_rt_tol) + _fraction_of_tol(
+        mz_delta_in_mode, config.replicate_mz_tol
+    )
+    return matches, {
+        "rt_delta": rt_delta,
+        "mz_delta_da": mz_delta_da,
+        "mz_delta_ppm": mz_delta_ppm,
+        "mz_delta_in_mode": mz_delta_in_mode,
+        "distance": distance,
+    }
+
+
+def _cluster_centroid(rows: List[pd.Series]) -> Dict[str, float]:
+    return {
+        "RT": sum(float(row["RT"]) for row in rows) / len(rows),
+        "Base Peak": sum(float(row["Base Peak"]) for row in rows) / len(rows),
+    }
+
+
+def _cluster_match_to_centroid(
+    centroid: Dict[str, float], candidate: pd.Series, config: ScreeningConfig
+) -> tuple[bool, Dict[str, float]]:
+    rt_delta = abs(float(candidate["RT"]) - centroid["RT"])
+    mz_delta_da = abs(float(candidate["Base Peak"]) - centroid["Base Peak"])
+    mz_delta_ppm = _ppm_delta(float(candidate["Base Peak"]), centroid["Base Peak"])
+    mz_delta_in_mode = _mz_delta(float(candidate["Base Peak"]), centroid["Base Peak"], config.replicate_mz_mode)
+    matches = rt_delta <= config.replicate_rt_tol and mz_delta_in_mode <= config.replicate_mz_tol
+    distance = _fraction_of_tol(rt_delta, config.replicate_rt_tol) + _fraction_of_tol(
+        mz_delta_in_mode, config.replicate_mz_tol
+    )
+    return matches, {
+        "rt_delta": rt_delta,
+        "mz_delta_da": mz_delta_da,
+        "mz_delta_ppm": mz_delta_ppm,
+        "mz_delta_in_mode": mz_delta_in_mode,
+        "distance": distance,
+    }
+
+
+def _choose_cluster_members(
+    seed_row: pd.Series,
+    seed_bucket_idx: int,
+    buckets: List[Tuple[str, pd.DataFrame]],
+    used_indices: set[tuple[int, int]],
+    config: ScreeningConfig,
+) -> List[Dict[str, Any]]:
+    members = [
+        {
+            "bucket_name": buckets[seed_bucket_idx][0],
+            "bucket_index": seed_bucket_idx,
+            "row_index": int(seed_row.name),
+            "row": seed_row,
+            "distance": 0.0,
+        }
+    ]
+    centroid = _cluster_centroid([seed_row])
+
+    for bucket_idx, (bucket_name, bucket_df) in enumerate(buckets):
+        if bucket_idx == seed_bucket_idx:
+            continue
+
+        best_candidate: Dict[str, Any] | None = None
+        for row_index, candidate in bucket_df.iterrows():
+            index_key = (bucket_idx, int(row_index))
+            if index_key in used_indices:
+                continue
+            matches, metrics = _cluster_match_to_centroid(centroid, candidate, config)
+            if not matches:
+                continue
+            contender = {
+                "bucket_name": bucket_name,
+                "bucket_index": bucket_idx,
+                "row_index": int(row_index),
+                "row": candidate,
+                "distance": metrics["distance"],
+                "metrics": metrics,
+            }
+            if (
+                best_candidate is None
+                or contender["distance"] < best_candidate["distance"]
+                or (
+                    contender["distance"] == best_candidate["distance"]
+                    and float(candidate["Area"]) > float(best_candidate["row"]["Area"])
+                )
+            ):
+                best_candidate = contender
+
+        if best_candidate is not None:
+            members.append(best_candidate)
+            centroid = _cluster_centroid([member["row"] for member in members])
+
+    return members
+
+
+def _pairwise_cluster_metrics(rows: List[pd.Series], config: ScreeningConfig) -> Dict[str, Any]:
+    rt_deltas: List[float] = []
+    mz_deltas_da: List[float] = []
+    mz_deltas_ppm: List[float] = []
+    mz_deltas_in_mode: List[float] = []
+
+    for left in range(len(rows)):
+        for right in range(left + 1, len(rows)):
+            _, metrics = _candidate_distance(rows[left], rows[right], config)
+            rt_deltas.append(metrics["rt_delta"])
+            mz_deltas_da.append(metrics["mz_delta_da"])
+            mz_deltas_ppm.append(metrics["mz_delta_ppm"])
+            mz_deltas_in_mode.append(metrics["mz_delta_in_mode"])
+
+    return {
+        "max_rt_delta": max(rt_deltas, default=0.0),
+        "max_mz_delta_da": max(mz_deltas_da, default=0.0),
+        "max_mz_delta_ppm": max(mz_deltas_ppm, default=0.0),
+        "max_mz_delta_in_mode": max(mz_deltas_in_mode, default=0.0),
+        "mean_rt_delta": sum(rt_deltas) / len(rt_deltas) if rt_deltas else 0.0,
+        "mean_mz_delta_in_mode": sum(mz_deltas_in_mode) / len(mz_deltas_in_mode) if mz_deltas_in_mode else 0.0,
+    }
+
+
+def _cluster_to_confirmed_row(
+    members: List[Dict[str, Any]],
+    colour_split: bool,
+    config: ScreeningConfig,
+) -> Dict[str, Any]:
+    rows = [member["row"] for member in members]
+    area_values = [float(row["Area"]) for row in rows]
+    rt_values = [float(row["RT"]) for row in rows]
+    mz_values = [float(row["Base Peak"]) for row in rows]
+    area_mean = sum(area_values) / len(area_values)
+    area_cv_pct = _calc_cv_percent(area_values)
+    replicate_quality = _classify_replicate_quality(area_cv_pct, config)
+    pairwise_metrics = _pairwise_cluster_metrics(rows, config)
+    replicate_score = _replicate_confidence_score(
+        rt_delta=pairwise_metrics["mean_rt_delta"],
+        rt_tol=config.replicate_rt_tol,
+        mz_delta_in_mode=pairwise_metrics["mean_mz_delta_in_mode"],
+        mz_tol=config.replicate_mz_tol,
+        cv_percent=area_cv_pct,
+        color_paired=colour_split,
+        config=config,
+    )
+
+    first_row = rows[0]
+    second_row = rows[1] if len(rows) > 1 else None
+    replicate_labels = [row.get("Label") for row in rows]
+    replicate_marks = [row.get("operator_mark") for row in rows]
+    replicate_colors = [row.get("operator_color") for row in rows]
+    replicate_files = [row.get("File") for row in rows]
+
+    return {
+        "Group": f"{first_row['SampleType']}_{first_row['Polarity']}",
+        "RT_mean": _safe_round(sum(rt_values) / len(rt_values), 4),
+        "MZ_mean": _safe_round(sum(mz_values) / len(mz_values), 6),
+        "Area_mean": _safe_round(area_mean, 2),
+        "AreaCVPct": _safe_round(area_cv_pct, 2),
+        "ReplicateQuality": replicate_quality,
+        "ReplicateCount": len(rows),
+        "ReplicateConfidenceScore": replicate_score,
+        "ConfidenceScore": replicate_score,
+        "Polarity": first_row["Polarity"],
+        "SampleType": first_row["SampleType"],
+        "Rep1_Label": first_row.get("Label"),
+        "Rep2_Label": second_row.get("Label") if second_row is not None else None,
+        "Rep1_Mark": first_row.get("operator_mark"),
+        "Rep2_Mark": second_row.get("operator_mark") if second_row is not None else None,
+        "Rep1_Color": first_row.get("operator_color"),
+        "Rep2_Color": second_row.get("operator_color") if second_row is not None else None,
+        "ReplicateFiles": replicate_files,
+        "ReplicateLabels": replicate_labels,
+        "ReplicateMarks": replicate_marks,
+        "ReplicateColors": replicate_colors,
+        "Confirmed": "Yes",
+        "Why": {
+            "ReplicateStrategy": "greedy_cluster",
+            "ReplicateBuckets": [member["bucket_name"] for member in members],
+            "ReplicateCount": len(rows),
+            "ReplicateMembers": [
+                {
+                    "bucket": member["bucket_name"],
+                    "file": row.get("File"),
+                    "label": row.get("Label"),
+                    "operator_mark": row.get("operator_mark"),
+                    "operator_color": row.get("operator_color"),
+                    "rt": _safe_round(row.get("RT"), 4),
+                    "mz": _safe_round(row.get("Base Peak"), 6),
+                    "area": _safe_round(row.get("Area"), 2),
+                }
+                for member, row in [(member, member["row"]) for member in members]
+            ],
+            "ReplicateRT": {
+                "mean": _safe_round(sum(rt_values) / len(rt_values), 4),
+                "max_delta": _safe_round(pairwise_metrics["max_rt_delta"], 4),
+                "tolerance": config.replicate_rt_tol,
+                "unit": "min",
+            },
+            "ReplicateMZ": {
+                "mean": _safe_round(sum(mz_values) / len(mz_values), 6),
+                "max_delta_da": _safe_round(pairwise_metrics["max_mz_delta_da"], 6),
+                "max_delta_ppm": _safe_round(pairwise_metrics["max_mz_delta_ppm"], 2),
+                "tolerance": config.replicate_mz_tol,
+                "mode": config.replicate_mz_mode,
+            },
+            "ReplicateArea": {
+                "values": [_safe_round(value, 2) for value in area_values],
+                "mean": _safe_round(area_mean, 2),
+                "cv_pct": _safe_round(area_cv_pct, 2),
+            },
+            "ReplicateQuality": replicate_quality,
+            "ReplicateConfidenceScore": replicate_score,
+            "ColorPaired": colour_split,
+            "Matches": True,
+            "ThresholdProfile": {
+                "replicate_rt_tol": config.replicate_rt_tol,
+                "replicate_mz_tol": config.replicate_mz_tol,
+                "replicate_mz_mode": config.replicate_mz_mode,
+                "blank_rt_tol": config.blank_rt_tol,
+                "blank_mz_tol": config.blank_mz_tol,
+                "blank_mz_mode": config.blank_mz_mode,
+                "signal_to_blank_min": config.signal_to_blank_min,
+            },
+        },
+    }
+
+
 def coarse_screen(group: pd.DataFrame, config: ScreeningConfig) -> pd.DataFrame:
     """
-    Pair rep1 vs rep2 rows within the same (SampleType, Polarity) group.
-    When operator colours are present the split is colour-driven; otherwise
-    it falls back to the legacy file-order split.
+    Greedily cluster one peak per replicate bucket within the same
+    (SampleType, Polarity) group. Buckets are colour-driven when that
+    yields an unambiguous two-replicate split; otherwise each file acts
+    as its own replicate bucket so n > 2 files are supported.
     """
-    rep1, rep2, colour_split = _pair_replicates(group)
-    if rep1.empty or rep2.empty:
+    buckets, colour_split = _split_replicate_buckets(group)
+    if len(buckets) < 2:
         return pd.DataFrame()
 
-    confirmed = []
-    for _, p1 in rep1.iterrows():
-        for _, p2 in rep2.iterrows():
-            rt_delta = abs(float(p1["RT"]) - float(p2["RT"]))
-            mz_delta_da = abs(float(p1["Base Peak"]) - float(p2["Base Peak"]))
-            mz_delta_ppm = _ppm_delta(float(p1["Base Peak"]), float(p2["Base Peak"]))
-            mz_delta_in_mode = _mz_delta(float(p1["Base Peak"]), float(p2["Base Peak"]), config.replicate_mz_mode)
-
-            if rt_delta > config.replicate_rt_tol or mz_delta_in_mode > config.replicate_mz_tol:
-                continue
-
-            area_values = [float(p1["Area"]), float(p2["Area"])]
-            area_mean = sum(area_values) / len(area_values)
-            area_cv_pct = _calc_cv_percent(area_values)
-            replicate_quality = _classify_replicate_quality(area_cv_pct, config)
-            replicate_score = _replicate_confidence_score(
-                rt_delta=rt_delta,
-                rt_tol=config.replicate_rt_tol,
-                mz_delta_in_mode=mz_delta_in_mode,
-                mz_tol=config.replicate_mz_tol,
-                cv_percent=area_cv_pct,
-                color_paired=colour_split,
-                config=config,
-            )
-
-            confirmed.append(
+    used_indices: set[tuple[int, int]] = set()
+    seed_candidates: List[Dict[str, Any]] = []
+    for bucket_idx, (_, bucket_df) in enumerate(buckets):
+        for row_index, row in bucket_df.iterrows():
+            seed_candidates.append(
                 {
-                    "Group": f"{p1['SampleType']}_{p1['Polarity']}",
-                    "RT_mean": _safe_round((float(p1["RT"]) + float(p2["RT"])) / 2, 4),
-                    "MZ_mean": _safe_round((float(p1["Base Peak"]) + float(p2["Base Peak"])) / 2, 6),
-                    "Area_mean": _safe_round(area_mean, 2),
-                    "AreaCVPct": _safe_round(area_cv_pct, 2),
-                    "ReplicateQuality": replicate_quality,
-                    "ReplicateCount": 2,
-                    "ReplicateConfidenceScore": replicate_score,
-                    "ConfidenceScore": replicate_score,
-                    "Polarity": p1["Polarity"],
-                    "SampleType": p1["SampleType"],
-                    "Rep1_Label": p1.get("Label"),
-                    "Rep2_Label": p2.get("Label"),
-                    "Rep1_Mark": p1.get("operator_mark"),
-                    "Rep2_Mark": p2.get("operator_mark"),
-                    "Rep1_Color": p1.get("operator_color"),
-                    "Rep2_Color": p2.get("operator_color"),
-                    "Confirmed": "Yes",
-                    "Why": {
-                        "ReplicateRT": {
-                            "rep1": _safe_round(p1["RT"], 4),
-                            "rep2": _safe_round(p2["RT"], 4),
-                            "delta": _safe_round(rt_delta, 4),
-                            "tolerance": config.replicate_rt_tol,
-                            "unit": "min",
-                        },
-                        "ReplicateMZ": {
-                            "rep1": _safe_round(p1["Base Peak"], 6),
-                            "rep2": _safe_round(p2["Base Peak"], 6),
-                            "delta_da": _safe_round(mz_delta_da, 6),
-                            "delta_ppm": _safe_round(mz_delta_ppm, 2),
-                            "tolerance": config.replicate_mz_tol,
-                            "mode": config.replicate_mz_mode,
-                        },
-                        "ReplicateArea": {
-                            "values": [_safe_round(area_values[0], 2), _safe_round(area_values[1], 2)],
-                            "mean": _safe_round(area_mean, 2),
-                            "cv_pct": _safe_round(area_cv_pct, 2),
-                        },
-                        "ReplicateQuality": replicate_quality,
-                        "ReplicateConfidenceScore": replicate_score,
-                        "ColorPaired": colour_split,
-                        "Matches": True,
-                        "ThresholdProfile": {
-                            "replicate_rt_tol": config.replicate_rt_tol,
-                            "replicate_mz_tol": config.replicate_mz_tol,
-                            "replicate_mz_mode": config.replicate_mz_mode,
-                            "blank_rt_tol": config.blank_rt_tol,
-                            "blank_mz_tol": config.blank_mz_tol,
-                            "blank_mz_mode": config.blank_mz_mode,
-                            "signal_to_blank_min": config.signal_to_blank_min,
-                        },
-                    },
+                    "bucket_idx": bucket_idx,
+                    "row_index": int(row_index),
+                    "row": row,
+                    "area": float(row["Area"]),
                 }
             )
+
+    seed_candidates.sort(
+        key=lambda item: (
+            -item["area"],
+            float(item["row"]["RT"]),
+            float(item["row"]["Base Peak"]),
+        )
+    )
+
+    confirmed = []
+    for seed in seed_candidates:
+        seed_key = (seed["bucket_idx"], seed["row_index"])
+        if seed_key in used_indices:
+            continue
+
+        members = _choose_cluster_members(
+            seed_row=seed["row"],
+            seed_bucket_idx=seed["bucket_idx"],
+            buckets=buckets,
+            used_indices=used_indices,
+            config=config,
+        )
+        if len(members) < 2:
+            continue
+
+        for member in members:
+            used_indices.add((member["bucket_index"], member["row_index"]))
+        confirmed.append(_cluster_to_confirmed_row(members, colour_split, config))
 
     return pd.DataFrame(confirmed)
 

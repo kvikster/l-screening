@@ -20,7 +20,7 @@
 
     <h1 class="text-4xl font-bold text-slate-900 mb-2">Методологія скрінінгу</h1>
     <p class="text-slate-500 text-lg mb-12">
-      Детальний опис вхідних даних, результатів та алгоритму обрахунку LC-MS Screening.
+      Детальний опис вхідних даних, результатів, QC-метрик та audit-oriented алгоритму обрахунку LC-MS Screening.
     </p>
 
     <!-- TOC -->
@@ -152,20 +152,30 @@
           <h3 class="step-title">Coarse Screening — підтвердження реплік</h3>
           <p class="text-slate-600 text-sm mb-3">
             Групуємо рядки за <code class="code">(SampleType, Polarity)</code>.
-            У кожній групі порівнюємо кожен пік Rep 1 з кожним піком Rep 2 (cross-join).
+            У кожній групі система формує <strong>replicate buckets</strong>:
+            або за operator marks, або за окремими файлами. Далі виконується
+            <strong>greedy clustering</strong> з правилом "не більше одного піку з кожного replicate bucket".
           </p>
           <div class="formula-block">
             <p class="formula-label">Умова підтвердження піку:</p>
-            <p class="font-mono">|RT₁ − RT₂| ≤ RT_TOL <span class="text-slate-400">(0.1 хв)</span></p>
-            <p class="font-mono mt-1">|mz₁ − mz₂| ≤ MZ_TOL <span class="text-slate-400">(0.3 Da)</span></p>
+            <p class="font-mono">|RT₁ − RT₂| ≤ replicate_rt_tol</p>
+            <p class="font-mono mt-1">|mz₁ − mz₂| ≤ replicate_mz_tol</p>
+            <p class="mt-2 text-xs text-slate-500">
+              Допуск по <code class="code">m/z</code> працює у вибраному режимі:
+              <code class="code">Da</code> або <code class="code">ppm</code>.
+            </p>
             <p class="mt-2 text-xs text-slate-500">
               Якщо обидві умови виконані — пік <strong>підтверджений</strong>.
               RT та m/z усереднюються: <code class="code">RT_mean = (RT₁ + RT₂) / 2</code>,
               аналогічно для <code class="code">MZ_mean</code> та <code class="code">Area_mean</code>.
+              Додатково система обчислює <code class="code">AreaCVPct</code>,
+              <code class="code">ReplicateQuality</code> і початковий <code class="code">ReplicateConfidenceScore</code>.
             </p>
           </div>
           <p class="mt-3 text-sm text-slate-500">
-            Піки, що не знайшли пари в репліці — відкидаються як ненадійні.
+            Це зменшує combinatorial overmatching, який характерний для cross-join, і дозволяє
+            підтримувати <strong>n &gt; 2 replicate files</strong>. Піки, що не знайшли кластер з
+            принаймні двома replicate buckets, відкидаються як ненадійні.
           </p>
         </div>
       </div>
@@ -180,20 +190,27 @@
             піками <strong>blank</strong> тієї ж полярності.
           </p>
           <div class="formula-block">
-            <p class="formula-label">Умова артефакту:</p>
+            <p class="formula-label">Умова blank match:</p>
             <p class="font-mono">Polarity_sample == Polarity_blank</p>
-            <p class="font-mono mt-1">|RT_mean_sample − RT_mean_blank| ≤ RT_TOL</p>
-            <p class="font-mono mt-1">|MZ_mean_sample − MZ_mean_blank| ≤ MZ_TOL</p>
+            <p class="font-mono mt-1">|RT_mean_sample − RT_mean_blank| ≤ blank_rt_tol</p>
+            <p class="font-mono mt-1">|MZ_mean_sample − MZ_mean_blank| ≤ blank_mz_tol</p>
+            <p class="font-mono mt-3">S/B = Area_mean_sample / Area_mean_blank</p>
             <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div class="rounded-md bg-red-50 border border-red-200 p-2 text-red-800">
-                <strong>Artifact</strong> — знайдений відповідник у blank.
+                <strong>Artifact</strong> — blank match знайдено і
+                <code class="code">S/B &lt; signal_to_blank_min</code>.
                 Пік, ймовірно, походить від розчинника або фону, а не від аналіту.
               </div>
               <div class="rounded-md bg-green-50 border border-green-200 p-2 text-green-800">
-                <strong>Real Compound</strong> — відповідника у blank немає.
+                <strong>Real Compound</strong> — blank match відсутній або
+                <code class="code">S/B ≥ signal_to_blank_min</code>.
                 Пік специфічний для зразка — ймовірно є сполукою аналіту.
               </div>
             </div>
+            <p class="mt-3 text-xs text-slate-500">
+              Це відокремлює replicate matching від blank subtraction: для них можуть бути різні
+              RT/m/z пороги та різні m/z режими.
+            </p>
           </div>
         </div>
       </div>
@@ -211,6 +228,9 @@
             <li><strong>Confirmed</strong> — кількість підтверджених пар після Coarse Screening.</li>
             <li><strong>Artifacts</strong> — підтверджені піки sample, що збіглися з blank.</li>
             <li><strong>Real Compounds</strong> — підтверджені піки sample без збігу в blank.</li>
+            <li><strong>Mean CV%</strong> — середній CV між підтвердженими реплікатами.</li>
+            <li><strong>Quality H/M/L</strong> — розподіл піків за <code class="code">ReplicateQuality</code>.</li>
+            <li><strong>Mean Confidence</strong> — середній підсумковий confidence score.</li>
           </ul>
         </div>
       </div>
@@ -250,23 +270,41 @@
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr class="hover:bg-slate-50/60">
-              <td class="px-5 py-3 font-mono font-semibold text-blue-700">RT_TOL</td>
+              <td class="px-5 py-3 font-mono font-semibold text-blue-700">replicate_rt_tol</td>
               <td class="px-5 py-3 font-mono">0.1</td>
               <td class="px-5 py-3 text-slate-500">хвилини</td>
-              <td class="px-5 py-3 text-slate-700">Coarse Screening + Out-Target Screening</td>
+              <td class="px-5 py-3 text-slate-700">Coarse Screening</td>
             </tr>
             <tr class="hover:bg-slate-50/60">
-              <td class="px-5 py-3 font-mono font-semibold text-blue-700">MZ_TOL</td>
+              <td class="px-5 py-3 font-mono font-semibold text-blue-700">replicate_mz_tol</td>
               <td class="px-5 py-3 font-mono">0.3</td>
-              <td class="px-5 py-3 text-slate-500">Da (m/z units)</td>
-              <td class="px-5 py-3 text-slate-700">Coarse Screening + Out-Target Screening</td>
+              <td class="px-5 py-3 text-slate-500">Da або ppm</td>
+              <td class="px-5 py-3 text-slate-700">Coarse Screening</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-5 py-3 font-mono font-semibold text-blue-700">blank_rt_tol</td>
+              <td class="px-5 py-3 font-mono">0.1</td>
+              <td class="px-5 py-3 text-slate-500">хвилини</td>
+              <td class="px-5 py-3 text-slate-700">Out-Target Screening</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-5 py-3 font-mono font-semibold text-blue-700">blank_mz_tol</td>
+              <td class="px-5 py-3 font-mono">0.3</td>
+              <td class="px-5 py-3 text-slate-500">Da або ppm</td>
+              <td class="px-5 py-3 text-slate-700">Out-Target Screening</td>
+            </tr>
+            <tr class="hover:bg-slate-50/60">
+              <td class="px-5 py-3 font-mono font-semibold text-blue-700">signal_to_blank_min</td>
+              <td class="px-5 py-3 font-mono">3.0</td>
+              <td class="px-5 py-3 text-slate-500">ratio</td>
+              <td class="px-5 py-3 text-slate-700">Artifact / Real Compound decision</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p class="mt-3 text-xs text-slate-400">
-        Значення жорстко задані в backend-конфігурації. Обидва параметри застосовуються
-        однаково як при порівнянні реплік, так і при blank subtraction.
+        Значення мають дефолт у backend-конфігурації, але можуть бути змінені у screening form на головній сторінці.
+        Replicate matching і blank subtraction налаштовуються незалежно.
       </p>
     </section>
 
@@ -297,22 +335,26 @@
   ];
 
   const operatorMarks = [
-    { mark: "sample_rep1",    color: "#fde68a", desc: "Sample, Replicate 1 (позитивна полярність)" },
-    { mark: "sample_rep2",    color: "#bbf7d0", desc: "Sample, Replicate 2 (негативна полярність)" },
-    { mark: "blank_positive", color: "#bfdbfe", desc: "Blank, позитивна полярність" },
-    { mark: "blank_negative", color: "#fecaca", desc: "Blank, негативна полярність" },
+    { mark: "sample_rep1",    color: "#ff00ff", desc: "Sample, Replicate 1" },
+    { mark: "sample_rep2",    color: "#ffff00", desc: "Sample, Replicate 2" },
+    { mark: "blank_positive", color: "#00ffff", desc: "Blank" },
+    { mark: "blank_negative", color: "#00ff00", desc: "Blank" },
   ];
 
   const outputFields = [
     { name: "RT_mean",    desc: "Середнє значення RT між Rep 1 та Rep 2.",              note: "RT_mean = (RT₁ + RT₂) / 2, округлено до 4 знаків" },
-    { name: "MZ_mean",    desc: "Середнє значення m/z між Rep 1 та Rep 2.",             note: "MZ_mean = (mz₁ + mz₂) / 2, округлено до 2 знаків" },
-    { name: "Area_mean",  desc: "Середня площа піку між Rep 1 та Rep 2.",               note: "Ціле число" },
+    { name: "MZ_mean",    desc: "Середнє значення m/z між Rep 1 та Rep 2.",             note: "MZ_mean = (mz₁ + mz₂) / 2, збережено з вищою точністю для audit trail" },
+    { name: "Area_mean",  desc: "Середня площа піку між Rep 1 та Rep 2.",               note: "Не обрізається до int, щоб не втрачати precision" },
+    { name: "AreaCVPct",  desc: "CV% між replicate areas — ключовий показник відтворюваності.", note: null },
+    { name: "ReplicateQuality", desc: "Категорія якості реплікатів: High / Moderate / Low.", note: "Визначається за CV%" },
+    { name: "SignalToBlankRatio", desc: "Відношення sample signal до blank signal для matched blank peak.", note: "Artifact зазвичай означає S/B < threshold" },
+    { name: "ConfidenceScore", desc: "Підсумковий confidence score з урахуванням replicate agreement та blank subtraction.", note: "0–100" },
     { name: "SampleType", desc: "Тип зразка: sample або blank.",                        note: null },
     { name: "Polarity",   desc: "Полярність: positive або negative.",                   note: null },
     { name: "Status",     desc: "Результат класифікації: Real Compound або Artifact.",  note: "Real Compound — специфічний для зразка пік; Artifact — наявний і в blank" },
     { name: "Rep1_Mark",  desc: "Operator mark першої репліки (якщо є кольорове маркування).", note: null },
     { name: "Rep2_Mark",  desc: "Operator mark другої репліки (якщо є кольорове маркування).", note: null },
-    { name: "Why",        desc: "JSON-об'єкт з деталями логіки рішення: RT та m/z обох реплік, чи було кольорове парування, чи знайдено blank-відповідник.", note: "Відображається у кнопці «Logic Detail» у таблиці результатів" },
+    { name: "Why",        desc: "JSON-об'єкт з деталями логіки рішення: replicate deltas, tolerance mode, CV%, blank match, S/B ratio та decision trail.", note: "Відображається у modal «Logic Detail» у таблиці результатів" },
   ];
 
   const glossary = [
@@ -322,13 +364,17 @@
     { term: "Polarity",      def: "Режим іонізації: positive (ESI+) або negative (ESI−). Визначає тип іонів, що детектуються." },
     { term: "Replicate",     def: "Повторне незалежне вимірювання того самого зразка для підтвердження відтворюваності." },
     { term: "Blank",         def: "Зразок-холостий (розчинник без аналіту). Піки, присутні в blank, вважаються фоновими артефактами." },
+    { term: "CV%",           def: "Coefficient of Variation — відносна варіабельність replicate areas. Нижчий CV означає кращу відтворюваність." },
+    { term: "S/B ratio",     def: "Signal-to-Blank ratio — співвідношення sample signal до blank signal для matched піку. Використовується замість бінарного blank subtraction." },
+    { term: "ppm",           def: "Parts per million — відносний допуск по m/z, типовий для high-resolution mass spectrometry." },
+    { term: "Confidence Score", def: "Зведений показник довіри до піку на основі replicate agreement, CV та blank subtraction outcome." },
     { term: "Coarse Screening", def: "Перший етап фільтрації: підтвердження піку через збіг між двома репліками за RT та m/z." },
     { term: "Out-Target Screening", def: "Другий етап: blank subtraction — видалення піків, що присутні в blank-зразку." },
     { term: "Artifact",      def: "Пік, що знайдений у blank — ймовірно, артефакт матриці або забруднення, не пов'язане з аналітом." },
     { term: "Real Compound", def: "Пік, відсутній у blank — специфічний для зразка, ймовірно є досліджуваною сполукою." },
     { term: "Operator mark", def: "Ручне кольорове маркування клітинок у Excel-файлі оператором для явного позначення типу рядка." },
-    { term: "RT_TOL",        def: "Допуск по RT (0.1 хв) — максимально допустима різниця retention time для ототожнення двох піків." },
-    { term: "MZ_TOL",        def: "Допуск по m/z (0.3 Da) — максимально допустима різниця m/z для ототожнення двох піків." },
+    { term: "replicate_rt_tol / blank_rt_tol", def: "Окремі допуски по RT для replicate matching та blank subtraction." },
+    { term: "replicate_mz_tol / blank_mz_tol", def: "Окремі допуски по m/z для replicate matching та blank subtraction; можуть працювати в Da або ppm." },
   ];
 </script>
 
@@ -381,7 +427,6 @@
     padding-left: 1.25rem;
     font-size: 0.875rem;
     color: #475569;
-    space-y: 0.25rem;
     line-height: 1.6;
   }
   :global(.formula-block) {
