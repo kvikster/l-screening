@@ -1,0 +1,85 @@
+# =========================
+# OS / Filesystem artifacts
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# =========================
+# Editor / IDE
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================
+# Node / frontend
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Svelte / Vite / deploy output
+.svelte-kit/
+.output/
+.vercel/
+.netlify/
+.wrangler/
+frontend/build/
+frontend/.svelte-kit/
+
+# =========================
+# Environment files
+# =========================
+.env
+.env.*
+!.env.example
+!.env.test
+
+# =========================
+# Rust / Tauri
+# =========================
+src-tauri/target/
+
+# =========================
+# Project-local artifacts
+# =========================
+*.log

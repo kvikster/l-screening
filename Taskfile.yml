@@ -1,0 +1,31 @@
+version: '3'
+
+tasks:
+  backend:
+    desc: Start the FastAPI backend
+    cmds:
+      - export PYTHONPATH=$PYTHONPATH:. && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+    dir: .
+
+  frontend:
+    desc: Start the SvelteKit frontend
+    cmds:
+      - npm run dev
+    dir: frontend
+
+  open:
+    desc: Open the application in the browser
+    cmds:
+      - open http://localhost:5173
+
+  setup:
+    desc: Install all dependencies for backend and frontend
+    cmds:
+      - pip install -r backend/requirements.txt
+      - cd frontend && npm install
+
+  default:
+    desc: Start both backend and frontend servers
+    deps: [backend, frontend]
+    cmds:
+      - task: open

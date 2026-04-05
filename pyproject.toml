@@ -1,0 +1,26 @@
+[project]
+name = "lc_ms_screening"
+version = "0.1.0"
+description = "LC-MS Screening Standalone App"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pytauri>=0.8.0,<0.9.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "anyio>=4.0.0",
+]
+
+[project.entry-points.pytauri]
+ext_mod = "lc_ms_screening.ext_mod"
+
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "python"
+module-name = "lc_ms_screening.ext_mod"
+manifest-path = "src-tauri/Cargo.toml"
+features = ["extension-module", "tauri/custom-protocol"]
+include = [{ path = "frontend/build/**/*", format = "sdist" }]
