@@ -1,6 +1,14 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import Dashboard from "$lib/components/Dashboard.svelte";
-    import { Download, Loader2, Upload } from "lucide-svelte";
+    import {
+        screenFile,
+        exportToXlsx,
+        isServerMode,
+        setServerMode,
+    } from "$lib/screening";
+    import type { ScreeningResult } from "$lib/screening";
+    import { Download, Loader2, Upload, Server } from "lucide-svelte";
 
     let dashboardProps: any = $state(null);
     let loading = $state(false);
@@ -8,6 +16,8 @@
     let exportingHtml = $state(false);
     let error = $state("");
     let currentFile: File | null = $state(null);
+    let cachedResult: ScreeningResult | null = $state(null);
+    let serverMode = $state(isServerMode());
     let screeningParams = $state({
         replicate_rt_tol: 0.1,
         replicate_mz_tol: 0.3,
@@ -17,6 +27,114 @@
         blank_mz_mode: "da",
         signal_to_blank_min: 3,
     });
+
+    interface BeforeInstallPromptEvent extends Event {
+        prompt: () => Promise<void>;
+        userChoice: Promise<{
+            outcome: "accepted" | "dismissed";
+            platform: string;
+        }>;
+    }
+
+    const isOnline = () =>
+        typeof navigator === "undefined" ? true : navigator.onLine;
+    const isStandalone = () =>
+        typeof window !== "undefined" &&
+        (window.matchMedia("(display-mode: standalone)").matches ||
+            (navigator as any).standalone === true);
+
+    let onlineStatus = $state(isOnline());
+    let standaloneMode = $state(false);
+    let updateReady = $state(false);
+    let installPromptEvent: BeforeInstallPromptEvent | null = $state(null);
+    let installSupported = $state(false);
+    let installDismissed = $state(false);
+    let installing = $state(false);
+
+    onMount(() => {
+        standaloneMode = isStandalone();
+
+        const syncOnlineStatus = () => {
+            onlineStatus = isOnline();
+        };
+
+        const handleSwMessage = (event: MessageEvent) => {
+            if (event.data?.type === "SW_UPDATED") {
+                updateReady = true;
+            }
+        };
+
+        navigator.serviceWorker?.addEventListener("message", handleSwMessage);
+
+        const handleBeforeInstallPrompt = (event: Event) => {
+            event.preventDefault();
+            installPromptEvent = event as BeforeInstallPromptEvent;
+            installSupported = true;
+            installDismissed = false;
+        };
+
+        const handleAppInstalled = () => {
+            installPromptEvent = null;
+            installSupported = false;
+            installDismissed = true;
+        };
+
+        window.addEventListener("online", syncOnlineStatus);
+        window.addEventListener("offline", syncOnlineStatus);
+        window.addEventListener(
+            "beforeinstallprompt",
+            handleBeforeInstallPrompt,
+        );
+        window.addEventListener("appinstalled", handleAppInstalled);
+
+        return () => {
+            window.removeEventListener("online", syncOnlineStatus);
+            window.removeEventListener("offline", syncOnlineStatus);
+            window.removeEventListener(
+                "beforeinstallprompt",
+                handleBeforeInstallPrompt,
+            );
+            window.removeEventListener("appinstalled", handleAppInstalled);
+            navigator.serviceWorker?.removeEventListener(
+                "message",
+                handleSwMessage,
+            );
+        };
+    });
+
+    async function handleInstallApp() {
+        if (!installPromptEvent) {
+            error =
+                "Install prompt is unavailable in this browser context. In Chrome, open the menu (⋮) and choose “Install app”.";
+            return;
+        }
+
+        installing = true;
+        const deferredPrompt = installPromptEvent;
+        installPromptEvent = null;
+
+        try {
+            await deferredPrompt.prompt();
+            const choice = await deferredPrompt.userChoice;
+            installDismissed = choice.outcome === "dismissed";
+        } finally {
+            installing = false;
+            installSupported = false;
+        }
+    }
+
+    function toggleServerMode() {
+        if (!serverMode && !isOnline()) {
+            error =
+                "Server mode requires a network connection. Stay in WASM mode for full offline use.";
+            return;
+        }
+        serverMode = !serverMode;
+        setServerMode(serverMode);
+        if (!serverMode) {
+            error = "";
+        }
+    }
 
     function appendScreeningParams(formData: FormData) {
         for (const [key, value] of Object.entries(screeningParams)) {
@@ -32,33 +150,54 @@
         loading = true;
         error = "";
         dashboardProps = null;
+        cachedResult = null;
         currentFile = file;
 
         try {
-            const formData = new FormData();
-            formData.append("file", file);
-            appendScreeningParams(formData);
+            if (!serverMode) {
+                // ── WASM path (default) ──────────────────────────────────
+                const result = await screenFile(file, screeningParams);
+                cachedResult = result;
+                dashboardProps = result.dashboardProps;
+                if (result.dashboardProps.parameters) {
+                    screeningParams = {
+                        ...screeningParams,
+                        ...result.dashboardProps.parameters,
+                    };
+                }
+            } else {
+                // ── Server path (fallback) ───────────────────────────────
+                if (!isOnline()) {
+                    throw new Error(
+                        "You are offline. Disable Server mode to process files with local WASM.",
+                    );
+                }
+                const formData = new FormData();
+                formData.append("file", file);
+                appendScreeningParams(formData);
 
-            const response = await fetch("http://localhost:8000/api/screen", {
-                method: "POST",
-                body: formData,
-            });
-
-            if (!response.ok) {
-                const err = await response
-                    .json()
-                    .catch(() => ({ detail: response.statusText }));
-                throw new Error(err.detail || "Server error");
-            }
-
-            const spec = await response.json();
-            const root = spec.elements?.[spec.root];
-            dashboardProps = root?.props ?? spec;
-            if (dashboardProps?.parameters) {
-                screeningParams = {
-                    ...screeningParams,
-                    ...dashboardProps.parameters,
-                };
+                const response = await fetch(
+                    "http://localhost:8000/api/screen",
+                    {
+                        method: "POST",
+                        body: formData,
+                    },
+                );
+                if (!response.ok) {
+                    const err = await response
+                        .json()
+                        .catch(() => ({ detail: response.statusText }));
+                    throw new Error(err.detail || "Server error");
+                }
+                const spec = await response.json();
+                const root = spec.elements?.[spec.root];
+                dashboardProps = root?.props ?? spec;
+                if (dashboardProps?.parameters) {
+                    screeningParams = {
+                        ...screeningParams,
+                        ...dashboardProps.parameters,
+                    };
+                }
             }
         } catch (e: any) {
             error =
@@ -74,30 +213,43 @@
         if (!currentFile) return;
         exporting = true;
         try {
-            const formData = new FormData();
-            formData.append("file", currentFile);
-            appendScreeningParams(formData);
-
-            const response = await fetch("http://localhost:8000/api/export", {
-                method: "POST",
-                body: formData,
-            });
-
-            if (!response.ok) {
-                const err = await response
-                    .json()
-                    .catch(() => ({ detail: response.statusText }));
-                throw new Error(err.detail || "Export failed");
+            if (!serverMode && cachedResult) {
+                await exportToXlsx(
+                    cachedResult,
+                    screeningParams,
+                    currentFile.name,
+                );
+            } else {
+                if (!isOnline()) {
+                    throw new Error(
+                        "You are offline. Disable Server mode to export with local WASM.",
+                    );
+                }
+                const formData = new FormData();
+                formData.append("file", currentFile);
+                appendScreeningParams(formData);
+                const response = await fetch(
+                    "http://localhost:8000/api/export",
+                    {
+                        method: "POST",
+                        body: formData,
+                    },
+                );
+                if (!response.ok) {
+                    const err = await response
+                        .json()
+                        .catch(() => ({ detail: response.statusText }));
+                    throw new Error(err.detail || "Export failed");
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                const stem = currentFile.name.replace(/\.[^.]+$/, "");
+                a.href = url;
+                a.download = `${stem}_screened.xlsx`;
+                a.click();
+                URL.revokeObjectURL(url);
             }
-
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            const stem = currentFile.name.replace(/\.[^.]+$/, "");
-            a.href = url;
-            a.download = `${stem}_screened.xlsx`;
-            a.click();
-            URL.revokeObjectURL(url);
         } catch (e: any) {
             error = (typeof e === "string" ? e : e.message) || "Export failed";
         } finally {
@@ -109,33 +261,71 @@
         if (!currentFile) return;
         exportingHtml = true;
         try {
-            const formData = new FormData();
-            formData.append("file", currentFile);
-            appendScreeningParams(formData);
+            if (!serverMode) {
+                const result = await screenFile(currentFile, screeningParams);
+                const peaks = result.allPeaks ?? [];
+                const summary = result.allSummary ?? [];
+                const stem = currentFile.name.replace(/\.[^.]+$/, "");
 
-            const response = await fetch(
-                "http://localhost:8000/api/export/html",
-                {
-                    method: "POST",
-                    body: formData,
-                },
-            );
+                const peaksHtml = peaks
+                    .map(
+                        (p: any) =>
+                            `<tr><td>${p.RT_mean}</td><td>${p.MZ_mean}</td><td>${p.Area_mean}</td><td>${p.Polarity}</td><td>${p.SampleType}</td><td>${p.Status}</td><td>${p.ConfidenceScore}</td><td>${p.AreaCVPct ?? ""}</td><td>${p.SignalToBlankRatio ?? ""}</td></tr>`,
+                    )
+                    .join("");
+                const summaryHtml = summary
+                    .map(
+                        (s: any) =>
+                            `<tr><td>${s.Sample}</td><td>${s.Polarity}</td><td>${s.TotalPeaks}</td><td>${s.Confirmed}</td><td>${s.RealCompounds}</td><td>${s.Artifacts}</td></tr>`,
+                    )
+                    .join("");
 
-            if (!response.ok) {
-                const err = await response
-                    .json()
-                    .catch(() => ({ detail: response.statusText }));
-                throw new Error(err.detail || "HTML export failed");
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${stem} — LC-MS Screening</title>
+<style>body{font-family:system-ui,sans-serif;padding:2rem}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:.4rem .6rem;font-size:.8rem}th{background:#1e40af;color:#fff}tr:nth-child(even){background:#f8fafc}</style>
+</head><body>
+<h1>LC-MS Screening — ${stem}</h1>
+<h2>Summary</h2><table><tr><th>Sample</th><th>Polarity</th><th>Total</th><th>Confirmed</th><th>Real</th><th>Artifact</th></tr>${summaryHtml}</table>
+<h2>Screened Peaks</h2><table><tr><th>RT</th><th>m/z</th><th>Area</th><th>Polarity</th><th>Sample</th><th>Status</th><th>Confidence</th><th>CV%</th><th>S/B</th></tr>${peaksHtml}</table>
+</body></html>`;
+
+                const blob = new Blob([html], { type: "text/html" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${stem}_screened_offline.html`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } else {
+                if (!isOnline()) {
+                    throw new Error(
+                        "You are offline. Disable Server mode to export HTML with local WASM.",
+                    );
+                }
+                const formData = new FormData();
+                formData.append("file", currentFile);
+                appendScreeningParams(formData);
+                const response = await fetch(
+                    "http://localhost:8000/api/export/html",
+                    {
+                        method: "POST",
+                        body: formData,
+                    },
+                );
+                if (!response.ok) {
+                    const err = await response
+                        .json()
+                        .catch(() => ({ detail: response.statusText }));
+                    throw new Error(err.detail || "HTML export failed");
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                const stem = currentFile.name.replace(/\.[^.]+$/, "");
+                a.href = url;
+                a.download = `${stem}_screened_offline.html`;
+                a.click();
+                URL.revokeObjectURL(url);
             }
-
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            const stem = currentFile.name.replace(/\.[^.]+$/, "");
-            a.href = url;
-            a.download = `${stem}_screened_offline.html`;
-            a.click();
-            URL.revokeObjectURL(url);
         } catch (e: any) {
             error =
                 (typeof e === "string" ? e : e.message) || "HTML export failed";
@@ -149,7 +339,21 @@
     <title>LC-MS Screening</title>
 </svelte:head>
 
-<main class="min-h-screen bg-slate-50">
+{#if updateReady}
+    <div
+        class="fixed inset-x-0 top-0 z-50 flex items-center justify-between gap-4 bg-blue-600 px-6 py-3 text-sm text-white shadow-md"
+    >
+        <span>Нова версія доступна.</span>
+        <button
+            class="rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+            onclick={() => window.location.reload()}
+        >
+            Оновити
+        </button>
+    </div>
+{/if}
+
+<main class="min-h-screen bg-slate-50" class:pt-12={updateReady}>
     <div class="px-8 py-12">
         {#if !dashboardProps}
             <div
@@ -166,11 +370,53 @@
                     <h1 class="text-2xl font-bold text-slate-900">
                         LC-MS Screening
                     </h1>
-                    <p class="mt-2 text-slate-500">
+                    <div class="mt-4 flex items-center justify-center gap-2">
+                        <span
+                            class={[
+                                "rounded-full px-3 py-1 text-xs font-medium",
+                                onlineStatus
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "bg-slate-200 text-slate-700",
+                            ].join(" ")}
+                        >
+                            {onlineStatus ? "Online" : "Offline"}
+                        </span>
+                        {#if !standaloneMode}
+                            <button
+                                class="inline-flex items-center rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                                onclick={handleInstallApp}
+                                disabled={installing}
+                                title={installSupported
+                                    ? "Install this app for offline use"
+                                    : "If prompt is unavailable, use browser menu: Install app"}
+                            >
+                                {#if installing}
+                                    <Loader2
+                                        class="mr-1.5 h-3.5 w-3.5 animate-spin"
+                                    />
+                                    Installing...
+                                {:else}
+                                    Install app
+                                {/if}
+                            </button>
+                        {/if}
+                    </div>
+                    {#if !standaloneMode && !installSupported}
+                        <p class="mt-2 text-xs text-slate-500">
+                            If no install prompt appears, use browser menu (⋮) →
+                            Install app.
+                        </p>
+                    {/if}
+                    <p class="mt-3 text-slate-500">
                         Upload an Excel (.xlsx) file to begin screening peaks.
                     </p>
                     <a
-                        href="/methodology"
+                        href={import.meta.env.VITE_STANDALONE
+                            ? "./methodology/"
+                            : "/methodology"}
+                        data-sveltekit-reload={import.meta.env.VITE_STANDALONE
+                            ? ""
+                            : undefined}
                         class="mt-3 inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline"
                     >
                         <svg
@@ -238,10 +484,27 @@
                                 Pharma / QC controls
                             </h2>
                         </div>
-                        <span
-                            class="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500 shadow-sm"
-                            >Audit-ready</span
-                        >
+                        <div class="flex flex-col items-end gap-1.5">
+                            <span
+                                class="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500 shadow-sm"
+                                >Audit-ready</span
+                            >
+                            <button
+                                onclick={toggleServerMode}
+                                title={serverMode
+                                    ? "Server mode ON — click to switch to WASM"
+                                    : "WASM mode — click to use Python server"}
+                                class={[
+                                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                                    serverMode
+                                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                                        : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+                                ].join(" ")}
+                            >
+                                <Server class="h-3 w-3" />
+                                {serverMode ? "Server mode" : "WASM"}
+                            </button>
+                        </div>
                     </div>
 
                     <div class="mt-6 grid gap-4 sm:grid-cols-2">
@@ -341,59 +604,101 @@
                 </section>
             </div>
         {:else}
-            <div class="mb-8 flex items-center justify-end gap-3 px-8">
-                <a
-                    href="/methodology"
-                    class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-                >
-                    <svg
-                        class="mr-2 h-4 w-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
+            <div class="mb-8 flex items-center justify-between gap-3 px-8">
+                <div class="flex items-center gap-2">
+                    <span
+                        class={[
+                            "rounded-full px-3 py-1 text-xs font-medium",
+                            onlineStatus
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-slate-200 text-slate-700",
+                        ].join(" ")}
                     >
-                        <circle cx="12" cy="12" r="10" /><path
-                            d="M12 16v-4m0-4h.01"
-                        />
-                    </svg>
-                    Методологія
-                </a>
-                <button
-                    class="inline-flex items-center rounded-full bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-50"
-                    onclick={handleExport}
-                    disabled={exporting}
-                >
-                    {#if exporting}
-                        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
-                        Експорт...
-                    {:else}
-                        <Download class="mr-2 h-4 w-4" />
-                        Експорт .xlsx
+                        {onlineStatus ? "Online" : "Offline"}
+                    </span>
+                    {#if !standaloneMode}
+                        <button
+                            class="inline-flex items-center rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                            onclick={handleInstallApp}
+                            disabled={installing}
+                            title={installSupported
+                                ? "Install this app for offline use"
+                                : "If prompt is unavailable, use browser menu: Install app"}
+                        >
+                            {#if installing}
+                                <Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                Installing...
+                            {:else}
+                                Install app
+                            {/if}
+                        </button>
+                        {#if !installSupported}
+                            <span class="text-xs text-slate-500">
+                                Menu (⋮) → Install app
+                            </span>
+                        {/if}
                     {/if}
-                </button>
-                <button
-                    class="inline-flex items-center rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
-                    onclick={handleExportHtml}
-                    disabled={exportingHtml}
-                >
-                    {#if exportingHtml}
-                        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
-                        Експорт...
-                    {:else}
-                        <Download class="mr-2 h-4 w-4" />
-                        Offline HTML
-                    {/if}
-                </button>
-                <button
-                    class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50"
-                    onclick={() => {
-                        dashboardProps = null;
-                        currentFile = null;
-                    }}
-                >
-                    <Upload class="mr-2 h-4 w-4" /> Upload New File
-                </button>
+                </div>
+                <div class="flex items-center gap-3">
+                    <a
+                        href={import.meta.env.VITE_STANDALONE
+                            ? "./methodology/"
+                            : "/methodology"}
+                        data-sveltekit-reload={import.meta.env.VITE_STANDALONE
+                            ? ""
+                            : undefined}
+                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                    >
+                        <svg
+                            class="mr-2 h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <circle cx="12" cy="12" r="10" /><path
+                                d="M12 16v-4m0-4h.01"
+                            />
+                        </svg>
+                        Методологія
+                    </a>
+                    <button
+                        class="inline-flex items-center rounded-full bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-50"
+                        onclick={handleExport}
+                        disabled={exporting}
+                    >
+                        {#if exporting}
+                            <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                            Експорт...
+                        {:else}
+                            <Download class="mr-2 h-4 w-4" />
+                            Експорт .xlsx
+                        {/if}
+                    </button>
+                    <button
+                        class="inline-flex items-center rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                        onclick={handleExportHtml}
+                        disabled={exportingHtml}
+                    >
+                        {#if exportingHtml}
+                            <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                            Експорт...
+                        {:else}
+                            <Download class="mr-2 h-4 w-4" />
+                            Offline HTML
+                        {/if}
+                    </button>
+                    <button
+                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50"
+                        onclick={() => {
+                            dashboardProps = null;
+                            cachedResult = null;
+                            currentFile = null;
+                        }}
+                    >
+                        <Upload class="mr-2 h-4 w-4" /> Upload New File
+                    </button>
+                </div>
             </div>
 
             <Dashboard

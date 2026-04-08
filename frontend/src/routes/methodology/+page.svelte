@@ -120,7 +120,8 @@
       <p class="mt-4 text-sm text-slate-500">
         Якщо кольорове маркування відсутнє — система класифікує рядки за
         <strong>іменем файлу</strong>: рядки з файлів, що містять слово <code class="font-mono">blank</code>,
-        відносяться до blank; файли що починаються з цифри відносяться до sample.
+        відносяться до blank; файли що починаються з <code class="font-mono">1_</code>...<code class="font-mono">9_</code>
+        або <code class="font-mono">1_neg</code>...<code class="font-mono">9_neg</code> відносяться до sample.
         Перший та другий унікальні файли в групі вважаються Rep 1 та Rep 2.
       </p>
     </section>
@@ -348,12 +349,12 @@
     { name: "AreaCVPct",  desc: "CV% між replicate areas — ключовий показник відтворюваності.", note: null },
     { name: "ReplicateQuality", desc: "Категорія якості реплікатів: High / Moderate / Low.", note: "Визначається за CV%" },
     { name: "SignalToBlankRatio", desc: "Відношення sample signal до blank signal для matched blank peak.", note: "Artifact зазвичай означає S/B < threshold" },
-    { name: "ConfidenceScore", desc: "Підсумковий confidence score з урахуванням replicate agreement та blank subtraction.", note: "0–100" },
+    { name: "ConfidenceScore", desc: "Підсумковий confidence score з урахуванням replicate agreement та blank subtraction.", note: "0–100 (обмежено зверху)" },
     { name: "SampleType", desc: "Тип зразка: sample або blank.",                        note: null },
     { name: "Polarity",   desc: "Полярність: positive або negative.",                   note: null },
     { name: "Status",     desc: "Результат класифікації: Real Compound або Artifact.",  note: "Real Compound — специфічний для зразка пік; Artifact — наявний і в blank" },
-    { name: "Rep1_Mark",  desc: "Operator mark першої репліки (якщо є кольорове маркування).", note: null },
-    { name: "Rep2_Mark",  desc: "Operator mark другої репліки (якщо є кольорове маркування).", note: null },
+    { name: "Rep1_File",  desc: "Ім'я файлу першої репліки.", note: null },
+    { name: "Rep2_File",  desc: "Ім'я файлу другої репліки.", note: null },
     { name: "Why",        desc: "JSON-об'єкт з деталями логіки рішення: replicate deltas, tolerance mode, CV%, blank match, S/B ratio та decision trail.", note: "Відображається у modal «Logic Detail» у таблиці результатів" },
   ];
 
