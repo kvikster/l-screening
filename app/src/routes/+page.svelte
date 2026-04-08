@@ -16,7 +16,6 @@
     import type { ScreeningResult } from "$lib/screening";
     import {
         CircleHelp,
-        Download,
         Loader2,
         Upload,
         Server,
@@ -575,72 +574,22 @@
                 </div>
             {/if}
         {:else}
-            <div class="mb-8 flex items-center justify-between gap-3 px-8">
-                <div class="flex items-center gap-2">
-                    <span
-                        class={[
-                            "rounded-full px-3 py-1 text-xs font-medium",
-                            onlineStatus
-                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                                : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
-                        ].join(" ")}
-                    >
-                        {onlineStatus ? dict.online : dict.offline}
-                    </span>
-                </div>
-                <div class="flex items-center gap-3">
-                    <details class="relative">
-                        <summary
-                            class="inline-flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            aria-label={`${dict.exportXlsx} / ${dict.exportHtml}`}
-                            title={`${dict.exportXlsx} / ${dict.exportHtml}`}
-                        >
-                            {#if exporting || exportingHtml}
-                                <Loader2 class="h-4 w-4 animate-spin" />
-                            {:else}
-                                <Download class="h-4 w-4" />
-                            {/if}
-                        </summary>
-                        <div
-                            class="absolute right-0 z-20 mt-2 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
-                        >
-                            <button
-                                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-100 dark:hover:bg-slate-700"
-                                onclick={handleExport}
-                                disabled={exporting || exportingHtml}
-                                type="button"
-                            >
-                                XLS
-                            </button>
-                            <button
-                                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-100 dark:hover:bg-slate-700"
-                                onclick={handleExportHtml}
-                                disabled={exporting || exportingHtml}
-                                type="button"
-                            >
-                                HTML
-                            </button>
-                        </div>
-                    </details>
-                    <button
-                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                        onclick={() => {
-                            dashboardProps = null;
-                            cachedResult = null;
-                            currentFile = null;
-                        }}
-                    >
-                        <Upload class="mr-2 h-4 w-4" /> {dict.uploadNewFile}
-                    </button>
-                </div>
-            </div>
-
             <Dashboard
                 title={dashboardProps.title}
                 summary={dashboardProps.summary}
                 peaks={dashboardProps.peaks}
                 parameters={dashboardProps.parameters}
                 metadata={dashboardProps.metadata}
+                onlineStatus={onlineStatus}
+                exporting={exporting}
+                exportingHtml={exportingHtml}
+                onExportXlsx={handleExport}
+                onExportHtml={handleExportHtml}
+                onUploadNewFile={() => {
+                    dashboardProps = null;
+                    cachedResult = null;
+                    currentFile = null;
+                }}
             />
         {/if}
     </div>
