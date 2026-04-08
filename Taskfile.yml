@@ -1,17 +1,17 @@
 version: "3"
 
 tasks:
-  backend:
-    desc: Start the FastAPI backend
+  server:
+    desc: Start the FastAPI server
     cmds:
-      - export PYTHONPATH=$PYTHONPATH:. && uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+      - uvicorn main:app --app-dir server/python-version --host 0.0.0.0 --port 8000 --reload
     dir: .
 
-  frontend:
-    desc: Start the SvelteKit frontend
+  app:
+    desc: Start the SvelteKit app
     cmds:
       - bun run dev
-    dir: frontend
+    dir: app
 
   open:
     desc: Open the application in the browser
@@ -19,21 +19,13 @@ tasks:
       - open http://localhost:5173
 
   setup:
-    desc: Install all dependencies for backend and frontend
+    desc: Install all dependencies for server and app
     cmds:
-      - pip install -r backend/requirements.txt
-      - cd frontend && bun install
-
-  standalone:singlepage:
-    desc: Build standalone and launch it in Chrome via local HTTP (single-page mode)
-    cmds:
-      - cd frontend && bun run build:standalone
-      - open -na "Google Chrome" http://localhost:4173
-      - python3 -m http.server 4173
-    dir: standalone
+      - pip install -r server/requirements.txt
+      - cd app && bun install
 
   default:
-    desc: Start both backend and frontend servers
-    deps: [backend, frontend]
+    desc: Start both server and app services
+    deps: [server, app]
     cmds:
       - task: open
