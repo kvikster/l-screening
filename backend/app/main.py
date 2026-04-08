@@ -765,7 +765,7 @@ def _render_offline_html(payload: dict) -> str:
         if (text.indexOf('"') !== -1) {{
           text = text.replace(/"/g, '""');
         }}
-        if (text.indexOf(",") !== -1 || text.indexOf("\n") !== -1 || text.indexOf("\r") !== -1) {{
+        if (text.indexOf(",") !== -1 || text.indexOf("\\n") !== -1 || text.indexOf("\\r") !== -1) {{
           text = '"' + text + '"';
         }}
         return text;
@@ -794,7 +794,7 @@ def _render_offline_html(payload: dict) -> str:
           lines.push(values.map(csvEscape).join(","));
         }});
 
-        var csv = "\ufeff" + lines.join("\n");
+        var csv = "\ufeff" + lines.join("\\n");
         var blob = new Blob([csv], {{ type: "text/csv;charset=utf-8;" }});
         var url = URL.createObjectURL(blob);
         var a = document.createElement("a");

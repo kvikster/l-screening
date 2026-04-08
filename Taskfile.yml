@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 tasks:
   backend:
@@ -10,7 +10,7 @@ tasks:
   frontend:
     desc: Start the SvelteKit frontend
     cmds:
-      - npm run dev
+      - bun run dev
     dir: frontend
 
   open:
@@ -22,7 +22,15 @@ tasks:
     desc: Install all dependencies for backend and frontend
     cmds:
       - pip install -r backend/requirements.txt
-      - cd frontend && npm install
+      - cd frontend && bun install
+
+  standalone:singlepage:
+    desc: Build standalone and launch it in Chrome via local HTTP (single-page mode)
+    cmds:
+      - cd frontend && bun run build:standalone
+      - open -na "Google Chrome" http://localhost:4173
+      - python3 -m http.server 4173
+    dir: standalone
 
   default:
     desc: Start both backend and frontend servers

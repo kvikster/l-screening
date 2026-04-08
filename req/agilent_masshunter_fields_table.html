@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Поля для експорту з Agilent MassHunter</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.5;
+      margin: 0;
+      background: #f7f9fb;
+      color: #1f2937;
+    }
+    .container {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 28px 20px 48px;
+    }
+    h1 {
+      font-size: 30px;
+      margin: 0 0 10px 0;
+      color: #0f172a;
+    }
+    h2 {
+      font-size: 22px;
+      margin-top: 32px;
+      color: #0f172a;
+    }
+    .intro, .box {
+      background: #ffffff;
+      border: 1px solid #dbe3ea;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+    }
+    .box-yellow {
+      background: #fff8db;
+      border: 1px solid #f2df8c;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .chip {
+      background: #e8f1fb;
+      color: #174ea6;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #ffffff;
+      border: 1px solid #dbe3ea;
+      overflow: hidden;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 10px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #eef4f8;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 12px;
+    }
+    ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+    li {
+      margin-bottom: 6px;
+    }
+    code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+    .footer {
+      font-size: 14px;
+      color: #4b5563;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Рекомендовані поля для експорту з Agilent MassHunter</h1>
+
+    <div class="intro">
+      <p><strong>Призначення:</strong> ця таблиця допомагає швидко узгодити, які поля варто експортувати з <strong>Agilent MassHunter</strong> для алгоритму аналізу піків, якості сигналу та виявлення артефактів.</p>
+      <p><strong>Контекст:</strong> Agilent 1260 Infinity II + Agilent Ultivo LC/TQ G6465B + типові LC/TQ workflow у MassHunter.</p>
+    </div>
+
+    <div class="box-yellow">
+      <strong>Що брати в першу чергу</strong>
+      <ul>
+        <li><strong>Minimum:</strong> базова ідентифікація зразка, аналіта і піка.</li>
+        <li><strong>Good:</strong> усе для практичного scoring і artifact detection.</li>
+        <li><strong>Ideal:</strong> усе для розширеної QA/QC і кращої моделі.</li>
+      </ul>
+    </div>
+
+    <div class="box">
+      <strong>Найцінніші поля саме для artifact detection</strong>
+      <div class="chips">
+        <span class="chip">SampleType</span><span class="chip">BlankType</span><span class="chip">InjectionOrder</span><span class="chip">RetentionTime</span><span class="chip">RTDelta</span><span class="chip">Area</span><span class="chip">ISTDArea</span><span class="chip">NormalizedArea</span><span class="chip">SignalToNoise / SNR</span><span class="chip">QualifierRatio</span><span class="chip">QualifierPassFlag</span><span class="chip">ManualIntegrationFlag</span>
+      </div>
+    </div>
+
+    <h2>Повна таблиця</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Field</th><th>Що означає</th><th>Навіщо алгоритму</th><th>Обов&#x27;язковість</th><th>Чи може бути в MassHunter export</th><th>Рекомендований рівень</th><th>Критично для artifact detection</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>SampleName</td><td>Назва зразка</td><td>Ідентифікація рядка та зв’язок із лабораторним записом</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>SampleType</td><td>Тип зразка: Unknown / Standard / QC / Blank</td><td>Відділяє реальні зразки від blank, QC та калібраторів</td><td>Обов’язково</td><td>Так / інколи з batch metadata</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>BatchID</td><td>Ідентифікатор серії аналізу</td><td>Для batch effect, групування та аналізу стабільності серії</td><td>Обов’язково</td><td>Часто так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>InjectionOrder</td><td>Порядок інжекції в серії</td><td>Потрібно для виявлення drift і carryover</td><td>Обов’язково</td><td>Часто так, іноді через batch/report</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>AcqDateTime</td><td>Дата і час інжекції</td><td>Дає часовий контекст і допомагає бачити дрейф по серії</td><td>Бажано</td><td>Часто так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>VialPosition</td><td>Позиція віали</td><td>Корисно для трасування помилок і перевірки послідовності інжекцій</td><td>Опційно</td><td>Часто так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>CompoundName</td><td>Назва аналіта</td><td>Основний ідентифікатор цілі аналізу</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>PrecursorMz</td><td>m/z материнського іона</td><td>Визначає MRM transition</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>ProductMz</td><td>m/z дочірнього іона</td><td>Визначає MRM transition</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>TransitionName / IonName</td><td>Назва переходу</td><td>Зручно для зв’язку з методом і контролю qualifier/quantifier іонів</td><td>Бажано</td><td>Так</td><td>Good</td><td>Ні</td></tr>
+<tr><td>Polarity</td><td>Режим іонізації: positive / negative</td><td>Важливо для коректної інтерпретації переходів та зіставлення даних</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>RetentionTime</td><td>Фактичний час утримування піка</td><td>Один із головних критеріїв підтвердження піка</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>ExpectedRT</td><td>Очікуваний RT із методу</td><td>Дає базу для порівняння з фактичним RT</td><td>Бажано</td><td>Так</td><td>Good</td><td>Ні</td></tr>
+<tr><td>RTDelta</td><td>Відхилення фактичного RT від очікуваного</td><td>Сильний сигнал для confidence scoring і artifact detection</td><td>Бажано</td><td>Іноді прямо, або легко обчислюється</td><td>Good</td><td>Так</td></tr>
+<tr><td>RTWindow</td><td>Допустиме вікно RT</td><td>Дозволяє оцінювати, чи пік в межах методу</td><td>Опційно</td><td>Часто так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>Area</td><td>Площа піка</td><td>Основний кількісний показник</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>Height</td><td>Висота піка</td><td>Додатковий показник інтенсивності</td><td>Обов’язково</td><td>Так</td><td>Minimum</td><td>Так</td></tr>
+<tr><td>PeakStartTime</td><td>Початок інтеграції піка</td><td>Дає змогу оцінити ширину та якість інтеграції</td><td>Бажано</td><td>Часто так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>PeakEndTime</td><td>Кінець інтеграції піка</td><td>Дає змогу оцінити ширину та якість інтеграції</td><td>Бажано</td><td>Часто так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>PeakWidth</td><td>Ширина піка</td><td>Корисно для виявлення шуму, поганого shape і matrix effects</td><td>Бажано</td><td>Іноді так, або обчислюється</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>SignalToNoise / SNR</td><td>Співвідношення сигнал/шум</td><td>Один із найкращих індикаторів якості піка</td><td>Дуже бажано</td><td>Так</td><td>Good</td><td>Так</td></tr>
+<tr><td>BaselineNoise</td><td>Рівень шуму базової лінії</td><td>Дає кращу інтерпретацію слабких сигналів</td><td>Опційно</td><td>Іноді так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>PeakSymmetry</td><td>Симетрія піка</td><td>Допомагає виявляти погані або спотворені піки</td><td>Опційно</td><td>Частіше ні, але можна обчислювати окремо</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>TailingFactor</td><td>Коефіцієнт tailing</td><td>Важливий для оцінки хроматографічної якості</td><td>Опційно</td><td>Частіше ні, але можна обчислювати окремо</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>ISTDName</td><td>Назва внутрішнього стандарту</td><td>Дає зрозуміти, з чим нормалізується аналіт</td><td>Дуже бажано</td><td>Так</td><td>Good</td><td>Ні</td></tr>
+<tr><td>ISTDArea</td><td>Площа піка внутрішнього стандарту</td><td>Основа для нормалізації сигналу</td><td>Дуже бажано</td><td>Так</td><td>Good</td><td>Так</td></tr>
+<tr><td>NormalizedArea</td><td>Area / ISTDArea</td><td>Один із найкорисніших показників для моделі</td><td>Дуже бажано</td><td>Часто обчислюється окремо</td><td>Good</td><td>Так</td></tr>
+<tr><td>ISTDConcentrationRatio</td><td>Відношення концентрації до ISTD</td><td>Корисно у quant workflow та калібруванні</td><td>Опційно</td><td>Так, у workflow підтримується</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>Qualifier1Area</td><td>Площа 1-го qualifier transition</td><td>Дозволяє перевірити ідентичність аналіта</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>Qualifier2Area</td><td>Площа 2-го qualifier transition</td><td>Додатковий confirmatory канал</td><td>Опційно</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>QualifierRatio</td><td>Відношення qualifier до quantifier</td><td>Один із ключових критеріїв підтвердження</td><td>Дуже бажано</td><td>Так</td><td>Good</td><td>Так</td></tr>
+<tr><td>ExpectedQualifierRatio</td><td>Очікуване qualifier ratio з методу</td><td>База для оцінки відхилення</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>QualifierPassFlag</td><td>Чи пройдено критерій qualifier ratio</td><td>Готовий індикатор для rule engine / ML</td><td>Дуже бажано</td><td>Так</td><td>Good</td><td>Так</td></tr>
+<tr><td>ManualIntegrationFlag</td><td>Чи пік редагувався вручну</td><td>Дуже важливо для довіри до даних</td><td>Дуже бажано</td><td>Часто так</td><td>Good</td><td>Так</td></tr>
+<tr><td>IntegrationType</td><td>Auto / Manual</td><td>Дає контекст, як отриманий результат</td><td>Бажано</td><td>Часто так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>CalibrationLevel</td><td>Рівень калібратора</td><td>Потрібно для побудови / перевірки калібрування</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>CalculatedConcentration</td><td>Розрахована концентрація</td><td>Фінальний кількісний результат</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>AccuracyPercent</td><td>Відсоток точності</td><td>Дозволяє оцінити надійність результату по стандартам/QC</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>ResponseFactor / RelativeResponseFactor</td><td>Відгук аналіта відносно концентрації</td><td>Корисно для контролю калібрування</td><td>Опційно</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>OutlierFlag</td><td>Ознака викиду</td><td>Дає готовий прапорець для виключення сумнівних точок</td><td>Бажано</td><td>Так</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>BlankType</td><td>Solvent / Process / Instrument blank</td><td>Дуже корисно для artifact detection</td><td>Дуже бажано</td><td>Зазвичай не з коробки, краще додавати окремо</td><td>Ideal</td><td>Так</td></tr>
+<tr><td>QCFlag</td><td>Ознака QC-зразка</td><td>Потрібно для drift control і оцінки стабільності</td><td>Дуже бажано</td><td>Часто через sample metadata</td><td>Ideal</td><td>Ні</td></tr>
+<tr><td>CarryoverFlag</td><td>Ознака можливого переносу</td><td>Корисно для автоматичного зниження confidence</td><td>Бажано</td><td>Частіше обчислюється окремим правилом</td><td>Ideal</td><td>Ні</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      Файлом CSV можна одразу користуватись у Excel, Google Sheets або передати команді для погодження шаблону експорту.
+    </div>
+  </div>
+</body>
+</html>

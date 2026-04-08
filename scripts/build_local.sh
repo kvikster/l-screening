@@ -15,8 +15,8 @@ mkdir -p src-tauri/pyembed
 # 2. Збірка Frontend
 echo "📦 Збірка Frontend (SvelteKit)..."
 cd frontend
-npm install
-npm run build
+bun install
+bun run build
 cd ..
 
 # 3. Завантаження портативного Python
