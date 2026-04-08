@@ -9,6 +9,7 @@
     } from "$lib/screening";
     import type { ScreeningResult } from "$lib/screening";
     import { Download, Loader2, Upload, Server } from "lucide-svelte";
+    import { base } from "$app/paths";
 
     let dashboardProps: any = $state(null);
     let loading = $state(false);
@@ -28,32 +29,13 @@
         signal_to_blank_min: 3,
     });
 
-    interface BeforeInstallPromptEvent extends Event {
-        prompt: () => Promise<void>;
-        userChoice: Promise<{
-            outcome: "accepted" | "dismissed";
-            platform: string;
-        }>;
-    }
-
     const isOnline = () =>
         typeof navigator === "undefined" ? true : navigator.onLine;
-    const isStandalone = () =>
-        typeof window !== "undefined" &&
-        (window.matchMedia("(display-mode: standalone)").matches ||
-            (navigator as any).standalone === true);
 
     let onlineStatus = $state(isOnline());
-    let standaloneMode = $state(false);
     let updateReady = $state(false);
-    let installPromptEvent: BeforeInstallPromptEvent | null = $state(null);
-    let installSupported = $state(false);
-    let installDismissed = $state(false);
-    let installing = $state(false);
 
     onMount(() => {
-        standaloneMode = isStandalone();
-
         const syncOnlineStatus = () => {
             onlineStatus = isOnline();
         };
@@ -66,62 +48,18 @@
 
         navigator.serviceWorker?.addEventListener("message", handleSwMessage);
 
-        const handleBeforeInstallPrompt = (event: Event) => {
-            event.preventDefault();
-            installPromptEvent = event as BeforeInstallPromptEvent;
-            installSupported = true;
-            installDismissed = false;
-        };
-
-        const handleAppInstalled = () => {
-            installPromptEvent = null;
-            installSupported = false;
-            installDismissed = true;
-        };
-
         window.addEventListener("online", syncOnlineStatus);
         window.addEventListener("offline", syncOnlineStatus);
-        window.addEventListener(
-            "beforeinstallprompt",
-            handleBeforeInstallPrompt,
-        );
-        window.addEventListener("appinstalled", handleAppInstalled);
 
         return () => {
             window.removeEventListener("online", syncOnlineStatus);
             window.removeEventListener("offline", syncOnlineStatus);
-            window.removeEventListener(
-                "beforeinstallprompt",
-                handleBeforeInstallPrompt,
-            );
-            window.removeEventListener("appinstalled", handleAppInstalled);
             navigator.serviceWorker?.removeEventListener(
                 "message",
                 handleSwMessage,
             );
         };
     });
-
-    async function handleInstallApp() {
-        if (!installPromptEvent) {
-            error =
-                "Install prompt is unavailable in this browser context. In Chrome, open the menu (⋮) and choose “Install app”.";
-            return;
-        }
-
-        installing = true;
-        const deferredPrompt = installPromptEvent;
-        installPromptEvent = null;
-
-        try {
-            await deferredPrompt.prompt();
-            const choice = await deferredPrompt.userChoice;
-            installDismissed = choice.outcome === "dismissed";
-        } finally {
-            installing = false;
-            installSupported = false;
-        }
-    }
 
     function toggleServerMode() {
         if (!serverMode && !isOnline()) {
@@ -353,21 +291,21 @@
     </div>
 {/if}
 
-<main class="min-h-screen bg-slate-50" class:pt-12={updateReady}>
+<main class="min-h-screen bg-slate-50 dark:bg-slate-900" class:pt-12={updateReady}>
     <div class="px-8 py-12">
         {#if !dashboardProps}
             <div
-                class="mx-auto grid max-w-5xl gap-8 rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm lg:grid-cols-[1.15fr_0.85fr]"
+                class="mx-auto grid max-w-5xl gap-8 rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:grid-cols-[1.15fr_0.85fr]"
             >
                 <section
-                    class="rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center transition-all hover:border-blue-400"
+                    class="rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center transition-all hover:border-blue-400 dark:border-slate-700 dark:bg-slate-800"
                 >
                     <div
-                        class="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-blue-600"
+                        class="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950"
                     >
                         <Upload class="h-8 w-8" />
                     </div>
-                    <h1 class="text-2xl font-bold text-slate-900">
+                    <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-50">
                         LC-MS Screening
                     </h1>
                     <div class="mt-4 flex items-center justify-center gap-2">
@@ -375,49 +313,24 @@
                             class={[
                                 "rounded-full px-3 py-1 text-xs font-medium",
                                 onlineStatus
-                                    ? "bg-emerald-50 text-emerald-700"
-                                    : "bg-slate-200 text-slate-700",
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                    : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
                             ].join(" ")}
                         >
                             {onlineStatus ? "Online" : "Offline"}
                         </span>
-                        {#if !standaloneMode}
-                            <button
-                                class="inline-flex items-center rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
-                                onclick={handleInstallApp}
-                                disabled={installing}
-                                title={installSupported
-                                    ? "Install this app for offline use"
-                                    : "If prompt is unavailable, use browser menu: Install app"}
-                            >
-                                {#if installing}
-                                    <Loader2
-                                        class="mr-1.5 h-3.5 w-3.5 animate-spin"
-                                    />
-                                    Installing...
-                                {:else}
-                                    Install app
-                                {/if}
-                            </button>
-                        {/if}
                     </div>
-                    {#if !standaloneMode && !installSupported}
-                        <p class="mt-2 text-xs text-slate-500">
-                            If no install prompt appears, use browser menu (⋮) →
-                            Install app.
-                        </p>
-                    {/if}
-                    <p class="mt-3 text-slate-500">
+                    <p class="mt-3 text-slate-500 dark:text-slate-400">
                         Upload an Excel (.xlsx) file to begin screening peaks.
                     </p>
                     <a
                         href={import.meta.env.VITE_STANDALONE
                             ? "./methodology/"
-                            : "/methodology"}
+                            : `${base}/methodology`}
                         data-sveltekit-reload={import.meta.env.VITE_STANDALONE
                             ? ""
                             : undefined}
-                        class="mt-3 inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline"
+                        class="mt-3 inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
                     >
                         <svg
                             class="h-3.5 w-3.5"
@@ -438,13 +351,7 @@
                         <input
                             type="file"
                             accept=".xlsx,.xls"
-                            class="block w-full text-sm text-slate-500
-                file:mr-4 file:py-2 file:px-4
-                file:rounded-full file:border-0
-                file:text-sm file:font-semibold
-                file:bg-blue-600 file:text-white
-                hover:file:bg-blue-700
-                cursor-pointer"
+                            class="block w-full cursor-pointer text-sm text-slate-500 dark:text-slate-400 file:mr-4 file:rounded-full file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700"
                             onchange={handleUpload}
                             disabled={loading}
                         />
@@ -461,7 +368,7 @@
 
                     {#if error}
                         <div
-                            class="mt-6 rounded-lg bg-red-50 p-3 text-sm text-red-600"
+                            class="mt-6 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950 dark:text-red-400"
                         >
                             {error}
                         </div>
@@ -469,24 +376,24 @@
                 </section>
 
                 <section
-                    class="rounded-3xl border border-slate-200 bg-slate-50 p-6"
+                    class="rounded-3xl border border-slate-200 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-800"
                 >
                     <div class="flex items-start justify-between gap-4">
                         <div>
                             <p
-                                class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"
+                                class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500"
                             >
                                 Screening Parameters
                             </p>
                             <h2
-                                class="mt-2 text-xl font-semibold text-slate-900"
+                                class="mt-2 text-xl font-semibold text-slate-900 dark:text-slate-50"
                             >
                                 Pharma / QC controls
                             </h2>
                         </div>
                         <div class="flex flex-col items-end gap-1.5">
                             <span
-                                class="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500 shadow-sm"
+                                class="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500 shadow-sm dark:bg-slate-700 dark:text-slate-400"
                                 >Audit-ready</span
                             >
                             <button
@@ -497,8 +404,8 @@
                                 class={[
                                     "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
                                     serverMode
-                                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                                        : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+                                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900 dark:text-amber-300 dark:hover:bg-amber-800"
+                                        : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900",
                                 ].join(" ")}
                             >
                                 <Server class="h-3 w-3" />
@@ -509,7 +416,7 @@
 
                     <div class="mt-6 grid gap-4 sm:grid-cols-2">
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Replicate RT tolerance</span
                             >
                             <input
@@ -517,11 +424,11 @@
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Replicate m/z tolerance</span
                             >
                             <input
@@ -529,23 +436,23 @@
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Replicate m/z mode</span
                             >
                             <select
                                 bind:value={screeningParams.replicate_mz_mode}
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             >
                                 <option value="da">Da</option>
                                 <option value="ppm">ppm</option>
                             </select>
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Blank RT tolerance</span
                             >
                             <input
@@ -553,11 +460,11 @@
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Blank m/z tolerance</span
                             >
                             <input
@@ -565,23 +472,23 @@
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Blank m/z mode</span
                             >
                             <select
                                 bind:value={screeningParams.blank_mz_mode}
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             >
                                 <option value="da">Da</option>
                                 <option value="ppm">ppm</option>
                             </select>
                         </label>
                         <label class="space-y-1.5 text-sm sm:col-span-2">
-                            <span class="font-medium text-slate-700"
+                            <span class="font-medium text-slate-700 dark:text-slate-300"
                                 >Signal-to-blank minimum</span
                             >
                             <input
@@ -589,13 +496,13 @@
                                 type="number"
                                 min="0"
                                 step="0.1"
-                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm"
+                                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-700 dark:text-slate-100"
                             />
                         </label>
                     </div>
 
                     <div
-                        class="mt-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900"
+                        class="mt-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
                     >
                         Replicate matching і blank subtraction налаштовуються
                         окремо. Для high-resolution LC-MS обирай `ppm`, для
@@ -610,44 +517,22 @@
                         class={[
                             "rounded-full px-3 py-1 text-xs font-medium",
                             onlineStatus
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-slate-200 text-slate-700",
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
                         ].join(" ")}
                     >
                         {onlineStatus ? "Online" : "Offline"}
                     </span>
-                    {#if !standaloneMode}
-                        <button
-                            class="inline-flex items-center rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
-                            onclick={handleInstallApp}
-                            disabled={installing}
-                            title={installSupported
-                                ? "Install this app for offline use"
-                                : "If prompt is unavailable, use browser menu: Install app"}
-                        >
-                            {#if installing}
-                                <Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                Installing...
-                            {:else}
-                                Install app
-                            {/if}
-                        </button>
-                        {#if !installSupported}
-                            <span class="text-xs text-slate-500">
-                                Menu (⋮) → Install app
-                            </span>
-                        {/if}
-                    {/if}
                 </div>
                 <div class="flex items-center gap-3">
                     <a
                         href={import.meta.env.VITE_STANDALONE
                             ? "./methodology/"
-                            : "/methodology"}
+                            : `${base}/methodology`}
                         data-sveltekit-reload={import.meta.env.VITE_STANDALONE
                             ? ""
                             : undefined}
-                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
                         <svg
                             class="mr-2 h-4 w-4"
@@ -689,7 +574,7 @@
                         {/if}
                     </button>
                     <button
-                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50"
+                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                         onclick={() => {
                             dashboardProps = null;
                             cachedResult = null;

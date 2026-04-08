@@ -239,7 +239,7 @@
             title: "Measurement uncertainty",
             url: "https://en.wikipedia.org/wiki/Measurement_uncertainty",
             summary:
-                "Невизначеність вимірювання описує допустимий розкид значень, пов’язаний із процедурою, інструментом і умовами аналізу. Коректне врахування невизначеності необхідне для відтворюваних рішень і порівнянності результатів.",
+                "Невизначеність вимірювання описує допустимий розкид значень, пов'язаний із процедурою, інструментом і умовами аналізу. Коректне врахування невизначеності необхідне для відтворюваних рішень і порівнянності результатів.",
             relevance:
                 "У вашому пайплайні допуски RT/mz та confidence scoring фактично формалізують практичну роботу з невизначеністю.",
         },
@@ -293,7 +293,7 @@
             title: "International Laboratory Accreditation Cooperation (ILAC)",
             url: "https://en.wikipedia.org/wiki/International_Laboratory_Accreditation_Cooperation",
             summary:
-                "ILAC просуває взаємне визнання акредитованих лабораторних результатів між країнами та організаціями. Це зменшує бар’єри для прийняття даних і підсилює довіру до лабораторних вимірювань.",
+                "ILAC просуває взаємне визнання акредитованих лабораторних результатів між країнами та організаціями. Це зменшує бар'єри для прийняття даних і підсилює довіру до лабораторних вимірювань.",
             relevance:
                 "У контексті вашої методології це аргумент на користь прозорих критеріїв і уніфікованих практик, якщо результати потрібно порівнювати зовні.",
         },
@@ -304,14 +304,14 @@
     <title>Методологія — LC-MS Screening</title>
 </svelte:head>
 
-<main class="min-h-screen bg-slate-50">
+<main class="min-h-screen bg-slate-50 dark:bg-slate-900">
     <div class="max-w-4xl mx-auto px-6 py-12">
         <!-- Header -->
         <div class="mb-10 flex items-center gap-4">
             <a
                 href={import.meta.env.VITE_STANDALONE ? '../' : '/'}
                 data-sveltekit-reload={import.meta.env.VITE_STANDALONE ? '' : undefined}
-                class="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
+                class="inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
             >
                 <svg
                     class="h-4 w-4"
@@ -326,24 +326,24 @@
             </a>
         </div>
 
-        <h1 class="text-4xl font-bold text-slate-900 mb-2">
+        <h1 class="text-4xl font-bold text-slate-900 mb-2 dark:text-slate-50">
             Методологія скрінінгу
         </h1>
-        <p class="text-slate-500 text-lg mb-12">
+        <p class="text-slate-500 text-lg mb-12 dark:text-slate-400">
             Детальний опис вхідних даних, результатів, QC-метрик та
             audit-oriented алгоритму обрахунку LC-MS Screening.
         </p>
 
         <!-- TOC -->
         <nav
-            class="mb-12 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+            class="mb-12 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800"
         >
             <p
-                class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3"
+                class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3 dark:text-slate-500"
             >
                 Зміст
             </p>
-            <ol class="space-y-1.5 text-sm text-blue-600">
+            <ol class="space-y-1.5 text-sm text-blue-600 dark:text-blue-400">
                 <li>
                     <a href="#input" class="hover:underline">1. Вхідні дані</a>
                 </li>
@@ -410,45 +410,24 @@
             <h2 class="section-title">2. Обов'язкові колонки Excel</h2>
 
             <div
-                class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
             >
                 <table class="w-full text-sm">
                     <thead>
-                        <tr class="border-b border-slate-100 bg-slate-50">
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Колонка</th
-                            >
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Тип</th
-                            >
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Опис</th
-                            >
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Приклад</th
-                            >
+                        <tr class="border-b border-slate-100 bg-slate-50 dark:border-slate-700 dark:bg-slate-700">
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Колонка</th>
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Тип</th>
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Опис</th>
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Приклад</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100">
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
                         {#each columns as col}
-                            <tr class="hover:bg-slate-50/60 transition-colors">
-                                <td
-                                    class="px-5 py-3 font-mono font-semibold text-blue-700"
-                                    >{col.name}</td
-                                >
-                                <td class="px-5 py-3 text-slate-500"
-                                    >{col.type}</td
-                                >
-                                <td class="px-5 py-3 text-slate-700"
-                                    >{col.desc}</td
-                                >
-                                <td class="px-5 py-3 font-mono text-slate-500"
-                                    >{col.example}</td
-                                >
+                            <tr class="transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-700/50">
+                                <td class="px-5 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">{col.name}</td>
+                                <td class="px-5 py-3 text-slate-500 dark:text-slate-400">{col.type}</td>
+                                <td class="px-5 py-3 text-slate-700 dark:text-slate-300">{col.desc}</td>
+                                <td class="px-5 py-3 font-mono text-slate-500 dark:text-slate-400">{col.example}</td>
                             </tr>
                         {/each}
                     </tbody>
@@ -456,13 +435,13 @@
             </div>
 
             <div
-                class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+                class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
             >
                 <strong>Опціонально:</strong> якщо у файлі присутня колонка
-                <code class="font-mono">Label</code>, вона зберігається у
+                <code class="code">Label</code>, вона зберігається у
                 результатах для зручності ідентифікації піку (наприклад, назва
                 сполуки або внутрішній ідентифікатор). Якщо присутня колонка
-                <code class="font-mono">operator_mark</code>
+                <code class="code">operator_mark</code>
                 — вона пріоритизується над іменем файлу для визначення типу зразка.
             </div>
         </section>
@@ -485,19 +464,17 @@
             <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {#each operatorMarks as m}
                     <div
-                        class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                        class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800"
                     >
                         <span
-                            class="mt-0.5 inline-block h-4 w-4 flex-shrink-0 rounded-full border border-black/10 shadow"
+                            class="mt-0.5 inline-block h-4 w-4 flex-shrink-0 rounded-full border border-black/10 shadow dark:border-white/10"
                             style="background-color: {m.color}"
                         ></span>
                         <div>
-                            <p
-                                class="font-mono font-semibold text-slate-800 text-sm"
-                            >
+                            <p class="font-mono font-semibold text-slate-800 text-sm dark:text-slate-200">
                                 {m.mark}
                             </p>
-                            <p class="text-xs text-slate-500 mt-0.5">
+                            <p class="text-xs text-slate-500 mt-0.5 dark:text-slate-400">
                                 {m.desc}
                             </p>
                         </div>
@@ -505,26 +482,22 @@
                 {/each}
             </div>
 
-            <p class="mt-4 text-sm text-slate-500">
+            <p class="mt-4 text-sm text-slate-500 dark:text-slate-400">
                 Якщо кольорове маркування відсутнє — система класифікує рядки за
                 <strong>іменем файлу</strong>: файли зі словом
-                <code class="font-mono">blank</code>
+                <code class="code">blank</code>
                 отримують
-                <code class="font-mono">SampleType=blank</code>; файли, що
+                <code class="code">SampleType=blank</code>; файли, що
                 починаються з
-                <code class="font-mono">1_</code>...<code class="font-mono"
-                    >9_</code
-                >
+                <code class="code">1_</code>...<code class="code">9_</code>
                 або
-                <code class="font-mono">1_neg</code>...<code class="font-mono"
-                    >9_neg</code
-                >, отримують
-                <code class="font-mono">SampleType=sample_1...sample_9</code>;
-                інші — <code class="font-mono">unknown</code>. Для грубого
+                <code class="code">1_neg</code>...<code class="code">9_neg</code>, отримують
+                <code class="code">SampleType=sample_1...sample_9</code>;
+                інші — <code class="code">unknown</code>. Для грубого
                 скринінгу (coarse screening) далі використовуються кошики реплік
                 (replicate buckets) (за мітками оператора (operator marks) або
                 файлами), тому підтримується
-                <code class="font-mono">n &gt; 2</code> файли реплік (replicate files).
+                <code class="code">n &gt; 2</code> файли реплік (replicate files).
             </p>
         </section>
 
@@ -574,7 +547,7 @@
                         Грубий скринінг (coarse screening) — підтвердження
                         реплік
                     </h3>
-                    <p class="text-slate-600 text-sm mb-3">
+                    <p class="text-slate-600 text-sm mb-3 dark:text-slate-400">
                         Групуємо рядки за <code class="code"
                             >(SampleType, Polarity)</code
                         >. У кожній групі система формує
@@ -593,13 +566,13 @@
                         <p class="font-mono mt-1">
                             |mz₁ − mz₂| ≤ replicate_mz_tol
                         </p>
-                        <p class="mt-2 text-xs text-slate-500">
+                        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
                             Допуск по <code class="code">m/z</code> працює у
                             вибраному режимі:
                             <code class="code">Da</code> або
                             <code class="code">ppm</code>.
                         </p>
-                        <p class="mt-2 text-xs text-slate-500">
+                        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
                             Якщо умови виконані між піками з різних replicate
                             buckets — формується
                             <strong>підтверджений кластер</strong> (мінімум 2
@@ -616,7 +589,7 @@
                             <code class="code">ReplicateConfidenceScore</code>.
                         </p>
                     </div>
-                    <p class="mt-3 text-sm text-slate-500">
+                    <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">
                         Це зменшує комбінаторне надмірне зіставлення
                         (combinatorial overmatching), характерне для
                         перехресного з'єднання (cross-join), і дозволяє
@@ -637,7 +610,7 @@
                         Позамішеневий скринінг (out-target screening) —
                         віднімання blank (blank subtraction)
                     </h3>
-                    <p class="text-slate-600 text-sm mb-3">
+                    <p class="text-slate-600 text-sm mb-3 dark:text-slate-400">
                         Беремо підтверджені піки <strong>sample</strong> та
                         зіставляємо їх із підтвердженими піками
                         <strong>blank</strong> тієї ж полярності.
@@ -660,7 +633,7 @@
                             class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs"
                         >
                             <div
-                                class="rounded-md bg-red-50 border border-red-200 p-2 text-red-800"
+                                class="rounded-md border border-red-200 bg-red-50 p-2 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
                             >
                                 <strong>Artifact</strong> — blank match знайдено
                                 і
@@ -673,7 +646,7 @@
                                 від розчинника або фону, а не від аналіту.
                             </div>
                             <div
-                                class="rounded-md bg-green-50 border border-green-200 p-2 text-green-800"
+                                class="rounded-md border border-green-200 bg-green-50 p-2 text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-300"
                             >
                                 <strong>Real Compound</strong> — blank match
                                 відсутній або
@@ -683,7 +656,7 @@
                                 сполукою аналіту.
                             </div>
                         </div>
-                        <p class="mt-3 text-xs text-slate-500">
+                        <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">
                             Це відокремлює replicate matching від blank
                             subtraction: для них можуть бути різні RT/m/z пороги
                             та різні m/z режими.
@@ -697,7 +670,7 @@
                 <div class="step-number">4</div>
                 <div class="flex-1">
                     <h3 class="step-title">Summary — зведена статистика</h3>
-                    <p class="text-slate-600 text-sm">
+                    <p class="text-slate-600 text-sm dark:text-slate-400">
                         Для кожної комбінації <code class="code"
                             >(SampleType, Polarity)</code
                         > обраховуються:
@@ -743,16 +716,16 @@
             <div class="space-y-4">
                 {#each outputFields as f}
                     <div
-                        class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-sm"
+                        class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-sm dark:border-slate-700 dark:bg-slate-800"
                     >
                         <code
-                            class="font-mono font-semibold text-blue-700 min-w-[140px] flex-shrink-0"
+                            class="min-w-[140px] flex-shrink-0 font-mono font-semibold text-blue-700 dark:text-blue-400"
                             >{f.name}</code
                         >
                         <div>
-                            <p class="text-slate-700">{f.desc}</p>
+                            <p class="text-slate-700 dark:text-slate-300">{f.desc}</p>
                             {#if f.note}
-                                <p class="mt-1 text-xs text-slate-400">
+                                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
                                     {f.note}
                                 </p>
                             {/if}
@@ -766,89 +739,52 @@
         <section id="params" class="mb-12">
             <h2 class="section-title">6. Параметри толерантності</h2>
             <div
-                class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
             >
                 <table class="w-full text-sm">
                     <thead>
-                        <tr class="border-b border-slate-100 bg-slate-50">
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Параметр</th
-                            >
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Значення</th
-                            >
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Одиниця</th
-                            >
-                            <th
-                                class="px-5 py-3 text-left font-semibold text-slate-700"
-                                >Де застосовується</th
-                            >
+                        <tr class="border-b border-slate-100 bg-slate-50 dark:border-slate-700 dark:bg-slate-700">
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Параметр</th>
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Значення</th>
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Одиниця</th>
+                            <th class="px-5 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Де застосовується</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        <tr class="hover:bg-slate-50/60">
-                            <td
-                                class="px-5 py-3 font-mono font-semibold text-blue-700"
-                                >replicate_rt_tol</td
-                            >
-                            <td class="px-5 py-3 font-mono">0.1</td>
-                            <td class="px-5 py-3 text-slate-500">хвилини</td>
-                            <td class="px-5 py-3 text-slate-700"
-                                >Грубий скринінг (coarse screening)</td
-                            >
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                        <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-700/50">
+                            <td class="px-5 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">replicate_rt_tol</td>
+                            <td class="px-5 py-3 font-mono dark:text-slate-300">0.1</td>
+                            <td class="px-5 py-3 text-slate-500 dark:text-slate-400">хвилини</td>
+                            <td class="px-5 py-3 text-slate-700 dark:text-slate-300">Грубий скринінг (coarse screening)</td>
                         </tr>
-                        <tr class="hover:bg-slate-50/60">
-                            <td
-                                class="px-5 py-3 font-mono font-semibold text-blue-700"
-                                >replicate_mz_tol</td
-                            >
-                            <td class="px-5 py-3 font-mono">0.3</td>
-                            <td class="px-5 py-3 text-slate-500">Da або ppm</td>
-                            <td class="px-5 py-3 text-slate-700"
-                                >Грубий скринінг (coarse screening)</td
-                            >
+                        <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-700/50">
+                            <td class="px-5 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">replicate_mz_tol</td>
+                            <td class="px-5 py-3 font-mono dark:text-slate-300">0.3</td>
+                            <td class="px-5 py-3 text-slate-500 dark:text-slate-400">Da або ppm</td>
+                            <td class="px-5 py-3 text-slate-700 dark:text-slate-300">Грубий скринінг (coarse screening)</td>
                         </tr>
-                        <tr class="hover:bg-slate-50/60">
-                            <td
-                                class="px-5 py-3 font-mono font-semibold text-blue-700"
-                                >blank_rt_tol</td
-                            >
-                            <td class="px-5 py-3 font-mono">0.1</td>
-                            <td class="px-5 py-3 text-slate-500">хвилини</td>
-                            <td class="px-5 py-3 text-slate-700"
-                                >Позамішеневий скринінг (out-target screening)</td
-                            >
+                        <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-700/50">
+                            <td class="px-5 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">blank_rt_tol</td>
+                            <td class="px-5 py-3 font-mono dark:text-slate-300">0.1</td>
+                            <td class="px-5 py-3 text-slate-500 dark:text-slate-400">хвилини</td>
+                            <td class="px-5 py-3 text-slate-700 dark:text-slate-300">Позамішеневий скринінг (out-target screening)</td>
                         </tr>
-                        <tr class="hover:bg-slate-50/60">
-                            <td
-                                class="px-5 py-3 font-mono font-semibold text-blue-700"
-                                >blank_mz_tol</td
-                            >
-                            <td class="px-5 py-3 font-mono">0.3</td>
-                            <td class="px-5 py-3 text-slate-500">Da або ppm</td>
-                            <td class="px-5 py-3 text-slate-700"
-                                >Позамішеневий скринінг (out-target screening)</td
-                            >
+                        <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-700/50">
+                            <td class="px-5 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">blank_mz_tol</td>
+                            <td class="px-5 py-3 font-mono dark:text-slate-300">0.3</td>
+                            <td class="px-5 py-3 text-slate-500 dark:text-slate-400">Da або ppm</td>
+                            <td class="px-5 py-3 text-slate-700 dark:text-slate-300">Позамішеневий скринінг (out-target screening)</td>
                         </tr>
-                        <tr class="hover:bg-slate-50/60">
-                            <td
-                                class="px-5 py-3 font-mono font-semibold text-blue-700"
-                                >signal_to_blank_min</td
-                            >
-                            <td class="px-5 py-3 font-mono">3.0</td>
-                            <td class="px-5 py-3 text-slate-500">ratio</td>
-                            <td class="px-5 py-3 text-slate-700"
-                                >Artifact / Real Compound decision</td
-                            >
+                        <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-700/50">
+                            <td class="px-5 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">signal_to_blank_min</td>
+                            <td class="px-5 py-3 font-mono dark:text-slate-300">3.0</td>
+                            <td class="px-5 py-3 text-slate-500 dark:text-slate-400">ratio</td>
+                            <td class="px-5 py-3 text-slate-700 dark:text-slate-300">Artifact / Real Compound decision</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-            <p class="mt-3 text-xs text-slate-400">
+            <p class="mt-3 text-xs text-slate-400 dark:text-slate-500">
                 Значення мають дефолт у backend-конфігурації, але можуть бути
                 змінені у формі скринінгу (screening form) на головній сторінці.
                 Зіставлення реплік (replicate matching) і віднімання blank
@@ -863,11 +799,11 @@
                 {#each glossary as g}
                     <div class="flex gap-3 text-sm">
                         <dt
-                            class="font-mono font-semibold text-blue-700 min-w-[150px] flex-shrink-0"
+                            class="min-w-[150px] flex-shrink-0 font-mono font-semibold text-blue-700 dark:text-blue-400"
                         >
                             {g.term}
                         </dt>
-                        <dd class="text-slate-700">{g.def}</dd>
+                        <dd class="text-slate-700 dark:text-slate-300">{g.def}</dd>
                     </div>
                 {/each}
             </div>
@@ -878,7 +814,7 @@
             <h2 class="section-title">
                 8. Термінологія та нормативні підходи (Wikipedia)
             </h2>
-            <p class="text-sm text-slate-500 mb-4">
+            <p class="text-sm text-slate-500 mb-4 dark:text-slate-400">
                 Нижче наведені перевірені Wikipedia-посилання на профільні
                 статті, що безпосередньо покривають термінологію та регуляторний
                 контекст LC-MS скринінгу. Для кожного пункту додано коротку
@@ -888,10 +824,10 @@
             <div class="space-y-3">
                 {#each wikiReferences as ref}
                     <div
-                        class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                        class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800"
                     >
                         <p
-                            class="text-xs uppercase tracking-wide text-slate-400 mb-1"
+                            class="text-xs uppercase tracking-wide text-slate-400 mb-1 dark:text-slate-500"
                         >
                             {ref.group}
                         </p>
@@ -899,15 +835,15 @@
                             href={ref.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="text-sm font-semibold text-blue-700 hover:underline"
+                            class="text-sm font-semibold text-blue-700 hover:underline dark:text-blue-400"
                         >
                             {ref.title}
                         </a>
-                        <p class="mt-2 text-xs text-slate-600 leading-5">
+                        <p class="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-400">
                             {ref.summary}
                         </p>
                         <p
-                            class="mt-2 text-xs text-slate-700 leading-5 border-t border-slate-100 pt-2"
+                            class="mt-2 border-t border-slate-100 pt-2 text-xs leading-5 text-slate-700 dark:border-slate-700 dark:text-slate-300"
                         >
                             <strong>Чому це релевантно тут:</strong>
                             {ref.relevance}
@@ -920,16 +856,48 @@
 </main>
 
 <style>
+    :root {
+        --section-title-color: #0f172a;
+        --section-border: #e2e8f0;
+        --prose-color: #475569;
+        --step-card-bg: white;
+        --step-card-border: #e2e8f0;
+        --step-number-bg: #eff6ff;
+        --step-number-color: #2563eb;
+        --step-title-color: #0f172a;
+        --step-list-color: #475569;
+        --formula-bg: #f8fafc;
+        --formula-border: #e2e8f0;
+        --formula-label-color: #94a3b8;
+        --code-bg: #f1f5f9;
+        --code-color: inherit;
+    }
+    :global(.dark) {
+        --section-title-color: #f1f5f9;
+        --section-border: #334155;
+        --prose-color: #94a3b8;
+        --step-card-bg: #1e293b;
+        --step-card-border: #334155;
+        --step-number-bg: #1e3a5f;
+        --step-number-color: #60a5fa;
+        --step-title-color: #f1f5f9;
+        --step-list-color: #94a3b8;
+        --formula-bg: #0f172a;
+        --formula-border: #334155;
+        --formula-label-color: #64748b;
+        --code-bg: #1e293b;
+        --code-color: #e2e8f0;
+    }
     :global(.section-title) {
         font-size: 1.375rem;
         font-weight: 700;
-        color: #0f172a;
+        color: var(--section-title-color);
         margin-bottom: 1rem;
         padding-bottom: 0.5rem;
-        border-bottom: 2px solid #e2e8f0;
+        border-bottom: 2px solid var(--section-border);
     }
     :global(.prose-block) {
-        color: #475569;
+        color: var(--prose-color);
         font-size: 0.9375rem;
         line-height: 1.7;
     }
@@ -937,8 +905,8 @@
         display: flex;
         gap: 1rem;
         margin-bottom: 1.25rem;
-        background: white;
-        border: 1px solid #e2e8f0;
+        background: var(--step-card-bg);
+        border: 1px solid var(--step-card-border);
         border-radius: 0.875rem;
         padding: 1.25rem;
         box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04);
@@ -948,8 +916,8 @@
         width: 2rem;
         height: 2rem;
         border-radius: 9999px;
-        background: #eff6ff;
-        color: #2563eb;
+        background: var(--step-number-bg);
+        color: var(--step-number-color);
         font-weight: 700;
         font-size: 0.875rem;
         display: flex;
@@ -960,36 +928,38 @@
     :global(.step-title) {
         font-weight: 600;
         font-size: 1rem;
-        color: #0f172a;
+        color: var(--step-title-color);
         margin-bottom: 0.5rem;
     }
     :global(.step-list) {
         list-style: disc;
         padding-left: 1.25rem;
         font-size: 0.875rem;
-        color: #475569;
+        color: var(--step-list-color);
         line-height: 1.6;
     }
     :global(.formula-block) {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
+        background: var(--formula-bg);
+        border: 1px solid var(--formula-border);
         border-left: 4px solid #3b82f6;
         border-radius: 0.5rem;
         padding: 1rem;
         font-size: 0.875rem;
+        color: var(--step-list-color);
     }
     :global(.formula-label) {
         font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        color: #94a3b8;
+        color: var(--formula-label-color);
         margin-bottom: 0.5rem;
     }
     :global(.code) {
         font-family: monospace;
         font-size: 0.85em;
-        background: #f1f5f9;
+        background: var(--code-bg);
+        color: var(--code-color);
         border-radius: 0.25rem;
         padding: 0.1em 0.35em;
     }
