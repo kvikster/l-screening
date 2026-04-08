@@ -10,6 +10,9 @@
     import type { ScreeningResult } from "$lib/screening";
     import { Download, Loader2, Upload, Server } from "lucide-svelte";
     import { base } from "$app/paths";
+    import MethodologyPanel from "$lib/components/MethodologyPanel.svelte";
+
+    let showMethodology = $state(false);
 
     let dashboardProps: any = $state(null);
     let loading = $state(false);
@@ -291,7 +294,10 @@
     </div>
 {/if}
 
-<main class="min-h-screen bg-slate-50 dark:bg-slate-900" class:pt-12={updateReady}>
+<main
+    class="min-h-screen bg-slate-50 dark:bg-slate-900"
+    class:pt-12={updateReady}
+>
     <div class="px-8 py-12">
         {#if !dashboardProps}
             <div
@@ -305,7 +311,9 @@
                     >
                         <Upload class="h-8 w-8" />
                     </div>
-                    <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-50">
+                    <h1
+                        class="text-2xl font-bold text-slate-900 dark:text-slate-50"
+                    >
                         LC-MS Screening
                     </h1>
                     <div class="mt-4 flex items-center justify-center gap-2">
@@ -323,28 +331,19 @@
                     <p class="mt-3 text-slate-500 dark:text-slate-400">
                         Upload an Excel (.xlsx) file to begin screening peaks.
                     </p>
-                    <a
-                        href={import.meta.env.VITE_STANDALONE
-                            ? "./methodology/"
-                            : `${base}/methodology`}
-                        data-sveltekit-reload={import.meta.env.VITE_STANDALONE
-                            ? ""
-                            : undefined}
+                    <button
                         class="mt-3 inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                        onclick={() => (showMethodology = !showMethodology)}
+                        type="button"
                     >
-                        <svg
-                            class="h-3.5 w-3.5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <circle cx="12" cy="12" r="10" /><path
-                                d="M12 16v-4m0-4h.01"
-                            />
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" /><path d="M12 16v-4m0-4h.01" />
                         </svg>
                         Про методологію скрінінгу
-                    </a>
+                        <svg class="h-3 w-3 transition-transform duration-200 {showMethodology ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M6 9l6 6 6-6" />
+                        </svg>
+                    </button>
 
                     <label class="mt-8 block">
                         <span class="sr-only">Choose file</span>
@@ -388,14 +387,10 @@
                             <h2
                                 class="mt-2 text-xl font-semibold text-slate-900 dark:text-slate-50"
                             >
-                                Pharma / QC controls
+                                QC controls
                             </h2>
                         </div>
                         <div class="flex flex-col items-end gap-1.5">
-                            <span
-                                class="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500 shadow-sm dark:bg-slate-700 dark:text-slate-400"
-                                >Audit-ready</span
-                            >
                             <button
                                 onclick={toggleServerMode}
                                 title={serverMode
@@ -416,7 +411,8 @@
 
                     <div class="mt-6 grid gap-4 sm:grid-cols-2">
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Replicate RT tolerance</span
                             >
                             <input
@@ -428,7 +424,8 @@
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Replicate m/z tolerance</span
                             >
                             <input
@@ -440,7 +437,8 @@
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Replicate m/z mode</span
                             >
                             <select
@@ -452,7 +450,8 @@
                             </select>
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Blank RT tolerance</span
                             >
                             <input
@@ -464,7 +463,8 @@
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Blank m/z tolerance</span
                             >
                             <input
@@ -476,7 +476,8 @@
                             />
                         </label>
                         <label class="space-y-1.5 text-sm">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Blank m/z mode</span
                             >
                             <select
@@ -488,7 +489,8 @@
                             </select>
                         </label>
                         <label class="space-y-1.5 text-sm sm:col-span-2">
-                            <span class="font-medium text-slate-700 dark:text-slate-300"
+                            <span
+                                class="font-medium text-slate-700 dark:text-slate-300"
                                 >Signal-to-blank minimum</span
                             >
                             <input
@@ -500,16 +502,14 @@
                             />
                         </label>
                     </div>
-
-                    <div
-                        class="mt-5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
-                    >
-                        Replicate matching і blank subtraction налаштовуються
-                        окремо. Для high-resolution LC-MS обирай `ppm`, для
-                        legacy workbook з грубим `m/z` округленням лишай `Da`.
-                    </div>
                 </section>
             </div>
+
+            {#if showMethodology}
+                <div class="mx-auto mt-6 max-w-5xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                    <MethodologyPanel />
+                </div>
+            {/if}
         {:else}
             <div class="mb-8 flex items-center justify-between gap-3 px-8">
                 <div class="flex items-center gap-2">
@@ -525,28 +525,6 @@
                     </span>
                 </div>
                 <div class="flex items-center gap-3">
-                    <a
-                        href={import.meta.env.VITE_STANDALONE
-                            ? "./methodology/"
-                            : `${base}/methodology`}
-                        data-sveltekit-reload={import.meta.env.VITE_STANDALONE
-                            ? ""
-                            : undefined}
-                        class="inline-flex items-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                    >
-                        <svg
-                            class="mr-2 h-4 w-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <circle cx="12" cy="12" r="10" /><path
-                                d="M12 16v-4m0-4h.01"
-                            />
-                        </svg>
-                        Методологія
-                    </a>
                     <button
                         class="inline-flex items-center rounded-full bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-50"
                         onclick={handleExport}

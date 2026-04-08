@@ -45,5 +45,6 @@ export default defineConfig({
     ],
     server: {
         fs: { allow: ['..'] },
+        historyApiFallback: true,
     },
 });
