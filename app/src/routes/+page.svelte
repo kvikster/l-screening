@@ -4,8 +4,12 @@
         dictionary,
         getSampleTypeLabel,
         getStatusLabel,
+        locale,
+        localeLabels,
+        setLocale,
         t,
     } from "$lib/i18n";
+    import { theme, cycleTheme, themeIcons } from "$lib/theme";
     import Dashboard from "$lib/components/Dashboard.svelte";
     import {
         screenFile,
@@ -24,6 +28,9 @@
 
     let showMethodology = $state(false);
     let dict = $derived($dictionary);
+    let currentTheme = $derived($theme);
+    let currentLocale = $derived($locale);
+    let themeLabels = $derived({ auto: dict.themeAuto, light: dict.themeLight, dark: dict.themeDark });
 
     let dashboardProps: any = $state(null);
     let loading = $state(false);
@@ -307,6 +314,8 @@
     </div>
 {/if}
 
+<svelte:window onkeydown={(e) => { if (e.key === "Escape" && showMethodology) showMethodology = false; }} />
+
 <main
     class="min-h-screen bg-slate-50 dark:bg-slate-900"
     class:pt-12={updateReady}
@@ -319,11 +328,11 @@
                 <section
                     class="rounded-[1.5rem] border-2 border-dashed border-slate-200 bg-slate-50 p-7 text-center transition-all hover:border-blue-400 dark:border-slate-700 dark:bg-slate-800"
                 >
-                    <div
-                        class="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950"
-                    >
-                        <Upload class="h-6 w-6" />
-                    </div>
+                    <img
+                        src="./icons/icon-128.png"
+                        alt={dict.appName}
+                        class="mx-auto mb-4 h-16 w-16 rounded-2xl shadow-sm"
+                    />
                     <h1
                         class="text-xl font-bold text-slate-900 dark:text-slate-50"
                     >
@@ -340,22 +349,46 @@
                         >
                             {onlineStatus ? dict.online : dict.offline}
                         </span>
+                        <span class="h-4 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true"></span>
+                        <label class="flex cursor-pointer items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                            </svg>
+                            <select
+                                class="bg-transparent outline-none text-[11px]"
+                                value={currentLocale}
+                                onchange={(e) => setLocale((e.currentTarget as HTMLSelectElement).value)}
+                                aria-label={dict.languageLabel}
+                            >
+                                {#each Object.entries(localeLabels) as [value, label]}
+                                    <option {value}>{label}</option>
+                                {/each}
+                            </select>
+                        </label>
+                        <button
+                            type="button"
+                            onclick={cycleTheme}
+                            title={themeLabels[currentTheme]}
+                            aria-label={themeLabels[currentTheme]}
+                            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                        >
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d={themeIcons[currentTheme]}/>
+                            </svg>
+                        </button>
                     </div>
                     <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
                         {dict.uploadIntro}
                     </p>
                     <button
                         class="mt-2 inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
-                        onclick={() => (showMethodology = !showMethodology)}
+                        onclick={() => (showMethodology = true)}
                         type="button"
                     >
                         <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="10" /><path d="M12 16v-4m0-4h.01" />
                         </svg>
                         {dict.methodologyToggle}
-                        <svg class="h-3 w-3 transition-transform duration-200 {showMethodology ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                            <path d="M6 9l6 6 6-6" />
-                        </svg>
                     </button>
 
                     <label class="mt-5 block">
@@ -568,11 +601,6 @@
                 </section>
             </div>
 
-            {#if showMethodology}
-                <div class="mx-auto mt-6 max-w-5xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                    <MethodologyPanel />
-                </div>
-            {/if}
         {:else}
             <Dashboard
                 title={dashboardProps.title}
@@ -594,6 +622,36 @@
         {/if}
     </div>
 </main>
+
+{#if showMethodology}
+  <div
+    class="fixed inset-0 z-50 flex flex-col bg-white dark:bg-slate-900"
+    role="dialog"
+    aria-modal="true"
+    aria-label={dict.methodologyToggle}
+  >
+    <div class="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+        {dict.methodologyToggle}
+      </p>
+      <button
+        type="button"
+        onclick={() => (showMethodology = false)}
+        class="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        aria-label={dict.close ?? "Close"}
+      >
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+      <div class="mx-auto max-w-4xl">
+        <MethodologyPanel />
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
     :global(body) {

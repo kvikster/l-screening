@@ -2,17 +2,29 @@
   import { onMount } from "svelte";
   import { Download, Loader2 } from "lucide-svelte";
   import PeaksDataTable from "./PeaksDataTable.svelte";
+  import QualityCube from "./QualityCube.svelte";
+  import FeatureLandscape from "./FeatureLandscape.svelte";
+  import CoverageMap from "./CoverageMap.svelte";
+  import ScoreSeparation from "./ScoreSeparation.svelte";
+  import PrecisionIntensity from "./PrecisionIntensity.svelte";
   import {
     dictionary,
     getNumberLocale,
     getSampleTypeLabel,
     getStatusLabel,
+    locale,
+    localeLabels,
+    setLocale,
     t,
   } from "$lib/i18n";
+  import { theme, cycleTheme, themeIcons } from "$lib/theme";
 
   let allProps = $props<any>();
   let element = $derived(allProps.element || { props: allProps });
   let dict = $derived($dictionary);
+  let currentTheme = $derived($theme);
+  let currentLocale = $derived($locale);
+  let themeLabels = $derived({ auto: dict.themeAuto, light: dict.themeLight, dark: dict.themeDark });
   let title = $derived(element.props?.title || dict.noTitle);
   let summary = $derived(element.props?.summary || []);
   let peaks = $derived(element.props?.peaks || []);
@@ -27,7 +39,8 @@
   let selectedPeak = $state<any>(null);
   let methodParamsOpen = $state(false);
   let summaryMetricsOpen = $state(false);
-  let activeTab = $state<"summary" | "data">("data");
+  let activeTab = $state<"summary" | "data" | "3d">("data");
+  let view3d = $state<"quality" | "landscape" | "coverage" | "score" | "precision">("quality");
   let dataFiltersOpen = $state(false);
   let openKpiHint = $state<string | null>(null);
   let activeMetric = $state<"confirmed" | "cv" | "confidence" | null>(null);
@@ -297,7 +310,7 @@
     openKpiHint = openKpiHint === key ? null : key;
   }
 
-  function setActiveTab(tab: "summary" | "data") {
+  function setActiveTab(tab: "summary" | "data" | "3d") {
     activeTab = tab;
   }
 
@@ -357,24 +370,53 @@
 <div class="mx-auto max-w-7xl space-y-4 px-4 pb-4">
   <div class="flex flex-wrap items-center gap-2">
     <div class="mr-auto min-w-[16rem]">
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 transition-colors hover:text-blue-500 dark:text-slate-500 dark:hover:text-blue-400"
-        onclick={onUploadNewFile}
-        title={dict.uploadNewFile}
-      >
-        <span>{dict.appName}</span>
-        <span
-          class={[
-            "rounded-full px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal",
-            onlineStatus
-              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-              : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
-          ].join(" ")}
+      <div class="inline-flex items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 transition-colors hover:text-blue-500 dark:text-slate-500 dark:hover:text-blue-400"
+          onclick={onUploadNewFile}
+          title={dict.uploadNewFile}
         >
-          {onlineStatus ? dict.online : dict.offline}
-        </span>
-      </button>
+          <span>{dict.appName}</span>
+          <span
+            class={[
+              "rounded-full px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal",
+              onlineStatus
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
+            ].join(" ")}
+          >
+            {onlineStatus ? dict.online : dict.offline}
+          </span>
+        </button>
+        <span class="h-4 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true"></span>
+        <label class="flex cursor-pointer items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+          <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <select
+            class="bg-transparent outline-none text-[11px]"
+            value={currentLocale}
+            onchange={(e) => setLocale((e.currentTarget as HTMLSelectElement).value)}
+            aria-label={dict.languageLabel}
+          >
+            {#each Object.entries(localeLabels) as [value, label]}
+              <option {value}>{label}</option>
+            {/each}
+          </select>
+        </label>
+        <button
+          type="button"
+          onclick={cycleTheme}
+          title={themeLabels[currentTheme]}
+          aria-label={themeLabels[currentTheme]}
+          class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d={themeIcons[currentTheme]}/>
+          </svg>
+        </button>
+      </div>
       <div class="mt-0.5 flex items-center gap-2">
         <h2 class="text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-50">{title}</h2>
         <details class="relative">
@@ -441,6 +483,11 @@
         class={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === "data" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
         onclick={() => setActiveTab("data")}
       >Дані</button>
+      <button
+        type="button"
+        class={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === "3d" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+        onclick={() => setActiveTab("3d")}
+      >3D</button>
     </div>
   </div>
 
@@ -682,7 +729,7 @@
     </section>
   </div>
 
-  {:else}
+  {:else if activeTab === "data"}
     <section class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
       <button
         type="button"
@@ -701,6 +748,60 @@
       <div class="p-4">
         <PeaksDataTable peaks={peaks} onAuditClick={openAuditTrail} showFilters={dataFiltersOpen} />
       </div>
+    </section>
+  {/if}
+
+  {#if activeTab === "3d"}
+    <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-5">
+      <div class="mb-4 flex items-center justify-between gap-4">
+        <div>
+          <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">
+            {view3d === "quality" ? "Quality Cube"
+              : view3d === "landscape" ? "Feature Landscape"
+              : view3d === "coverage" ? "Coverage Map"
+              : view3d === "score" ? "Score Separation"
+              : "Precision vs Intensity"}
+          </h3>
+        </div>
+        <div class="inline-flex shrink-0 rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-600 dark:bg-slate-700">
+          <button
+            type="button"
+            class={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${view3d === "quality" ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}
+            onclick={() => (view3d = "quality")}
+          >Quality Cube</button>
+          <button
+            type="button"
+            class={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${view3d === "landscape" ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}
+            onclick={() => (view3d = "landscape")}
+          >Feature Landscape</button>
+          <button
+            type="button"
+            class={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${view3d === "coverage" ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}
+            onclick={() => (view3d = "coverage")}
+          >Coverage Map</button>
+          <button
+            type="button"
+            class={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${view3d === "score" ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}
+            onclick={() => (view3d = "score")}
+          >Score Separation</button>
+          <button
+            type="button"
+            class={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${view3d === "precision" ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100" : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}
+            onclick={() => (view3d = "precision")}
+          >Precision vs Intensity</button>
+        </div>
+      </div>
+      {#if view3d === "quality"}
+        <QualityCube {peaks} {parameters} />
+      {:else if view3d === "landscape"}
+        <FeatureLandscape {peaks} {parameters} />
+      {:else if view3d === "coverage"}
+        <CoverageMap {peaks} {parameters} />
+      {:else if view3d === "score"}
+        <ScoreSeparation {peaks} {parameters} />
+      {:else}
+        <PrecisionIntensity {peaks} {parameters} />
+      {/if}
     </section>
   {/if}
 </div>

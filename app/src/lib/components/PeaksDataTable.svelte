@@ -31,6 +31,18 @@
       .sort((a: string, b: string) => a.localeCompare(b))
   );
 
+  let activeFilterCount = $derived.by(() => {
+    let n = 0;
+    if (statusFilter !== "all") n++;
+    if (qualityFilter !== "all") n++;
+    if (sampleFilter !== "all") n++;
+    if (polarityFilter !== "all") n++;
+    if (confidenceMin > 0) n++;
+    if (cvMax < 100) n++;
+    if (sbMin > 0) n++;
+    return n;
+  });
+
   let filteredPeaks = $derived.by(() => {
     return peaks
       .filter((peak: any) => {
@@ -139,13 +151,25 @@
     return `<span class="inline-flex items-center justify-center rounded-full p-1 ${cls}" title="${title}" aria-label="${title}">${icon}</span>`;
   }
 
-  function confidenceBar(score: any): string {
-    const pct = Math.max(0, Math.min(Number(score) || 0, 100));
-    return `<div class="flex items-center gap-2">
-      <div class="h-2 w-20 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
-        <div class="h-full rounded-full bg-blue-600" style="width:${pct}%"></div>
-      </div>
-      <span class="font-mono text-slate-700 dark:text-slate-300">${fmt(score, 1)}</span>
+  function confidenceCircle(score: any): string {
+    const num = Number(score);
+    if (!Number.isFinite(num)) return '<span class="text-slate-400 dark:text-slate-500">—</span>';
+    const pct = Math.max(0, Math.min(num, 100));
+    const r = 8;
+    const circumference = 2 * Math.PI * r;
+    const offset = circumference * (1 - pct / 100);
+    let color: string;
+    if (num >= 85) color = "#10b981";
+    else if (num >= confidenceMin) color = "#f59e0b";
+    else color = "#ef4444";
+    return `<div class="flex items-center gap-1.5">
+      <svg viewBox="0 0 24 24" width="20" height="20" style="transform:rotate(-90deg);flex-shrink:0">
+        <circle cx="12" cy="12" r="${r}" fill="none" stroke="rgba(100,116,139,0.18)" stroke-width="4"/>
+        <circle cx="12" cy="12" r="${r}" fill="none" stroke="${color}" stroke-width="4"
+          stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"
+          stroke-linecap="round"/>
+      </svg>
+      <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300">${fmt(score, 2)}</span>
     </div>`;
   }
 
@@ -188,7 +212,7 @@
           const area = Number(row.Area_mean);
           const areaPct = maxArea > 0 && Number.isFinite(area) ? Math.max(4, Math.min(100, (area / maxArea) * 100)) : 0;
           return `<div class="space-y-1">
-            <span class="font-mono text-slate-700 dark:text-slate-300">${fmt(row.RT_mean, 4)} × ${fmt(row.MZ_mean, 4)}</span>
+            <span class="font-mono text-slate-700 dark:text-slate-300">${fmt(row.RT_mean, 2)} × ${fmt(row.MZ_mean, 2)}</span>
             <div class="flex items-center gap-1.5">
               <span class="font-mono text-[10px] text-blue-700 dark:text-blue-300">A ${fmtN(area, 0)}</span>
               <span class="inline-block h-1.5 w-12 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950/60">
@@ -222,7 +246,7 @@
       {
         title: dict.confidence,
         data: "ConfidenceScore",
-        render: (d: any) => `<div class="${metricClass("confidence", d)}">${confidenceBar(d)}</div>`,
+        render: (d: any) => confidenceCircle(d),
       },
       {
         title: dict.sample,
@@ -382,76 +406,120 @@
 </script>
 
 {#if showFilters}
-<div class="mb-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/70 md:grid-cols-2 xl:grid-cols-4">
-  <label class="dt-filter-item">
-    <span>Status</span>
-    <select bind:value={statusFilter}>
-      <option value="Real Compound">{getStatusLabel("Real Compound")}</option>
-      <option value="all">All</option>
-      <option value="Artifact">{getStatusLabel("Artifact")}</option>
-    </select>
-  </label>
+<div class="mb-4 space-y-0 rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
 
-  <label class="dt-filter-item">
-    <span>{get(dictionary).replicateQuality}</span>
-    <select bind:value={qualityFilter}>
-      <option value="high_moderate">High + Moderate</option>
-      <option value="all">All</option>
-      <option value="High">{getReplicateQualityLabel("High")}</option>
-      <option value="Moderate">{getReplicateQualityLabel("Moderate")}</option>
-      <option value="Low">{getReplicateQualityLabel("Low")}</option>
-    </select>
-  </label>
-
-  <label class="dt-filter-item">
-    <span>{get(dictionary).sample}</span>
-    <select bind:value={sampleFilter}>
-      <option value="all">All</option>
-      {#each sampleOptions as option}
-        <option value={option}>{getSampleTypeLabel(option)}</option>
+  <!-- Row 1: Search + Grouping + Reset -->
+  <div class="flex items-center gap-2 px-3 py-2.5">
+    <div class="relative flex-1">
+      <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input
+        type="search"
+        bind:value={searchQuery}
+        placeholder="Пошук RT, m/z, статус…"
+        class="dt-search-input"
+      />
+    </div>
+    <div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5 text-xs dark:border-slate-600 dark:bg-slate-700">
+      {#each [["none", "—"], ["sample", "Зразок"], ["status", "Статус"]] as [val, label]}
+        <button
+          type="button"
+          onclick={() => (grouping = val as typeof grouping)}
+          class="rounded-md px-2 py-1 font-medium transition-colors {grouping === val ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}"
+        >{label}</button>
       {/each}
-    </select>
-  </label>
+    </div>
+    {#if activeFilterCount > 0}
+      <button
+        type="button"
+        onclick={resetDefaults}
+        class="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:border-rose-300 hover:text-rose-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-400 dark:hover:text-rose-400"
+        title="Скинути фільтри"
+      >
+        <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        <span class="rounded-full bg-rose-100 px-1.5 py-0.5 font-semibold text-rose-600 dark:bg-rose-950 dark:text-rose-400">{activeFilterCount}</span>
+      </button>
+    {/if}
+  </div>
 
-  <label class="dt-filter-item">
-    <span>{get(dictionary).polarity}</span>
-    <select bind:value={polarityFilter}>
-      <option value="all">All</option>
-      <option value="positive">{get(dictionary).positive}</option>
-      <option value="negative">{get(dictionary).negative}</option>
-    </select>
-  </label>
+  <div class="border-t border-slate-200 dark:border-slate-700"></div>
 
-  <label class="dt-filter-item">
-    <span>{get(dictionary).confidence} ≥ {confidenceMin}</span>
-    <input type="range" min="0" max="100" step="1" bind:value={confidenceMin} />
-  </label>
+  <!-- Row 2: two columns — chips left, sliders right -->
+  <div class="grid grid-cols-1 divide-y divide-slate-200 dark:divide-slate-700 sm:grid-cols-[1fr_auto] sm:divide-x sm:divide-y-0">
 
-  <label class="dt-filter-item">
-    <span>CV% ≤ {cvMax}</span>
-    <input type="range" min="0" max="100" step="1" bind:value={cvMax} />
-  </label>
+    <!-- Left: categorical chips -->
+    <div class="space-y-2 px-3 py-2.5">
+      <!-- Status -->
+      <div class="flex items-center gap-2">
+        <span class="dt-chip-label w-20 shrink-0">Статус</span>
+        <div class="flex flex-wrap gap-1">
+          {#each [["all", "Всі"], ["Real Compound", getStatusLabel("Real Compound")], ["Artifact", getStatusLabel("Artifact")]] as [val, label]}
+            <button type="button" onclick={() => (statusFilter = val)}
+              class="dt-chip {statusFilter === val ? (val === 'Real Compound' ? 'dt-chip-active-green' : val === 'Artifact' ? 'dt-chip-active-red' : 'dt-chip-active') : ''}"
+            >{label}</button>
+          {/each}
+        </div>
+      </div>
+      <!-- Quality -->
+      <div class="flex items-center gap-2">
+        <span class="dt-chip-label w-20 shrink-0">{get(dictionary).replicateQuality}</span>
+        <div class="flex flex-wrap gap-1">
+          {#each [["all", "Всі"], ["high_moderate", "High + Mod"], ["High", getReplicateQualityLabel("High")], ["Moderate", getReplicateQualityLabel("Moderate")], ["Low", getReplicateQualityLabel("Low")]] as [val, label]}
+            <button type="button" onclick={() => (qualityFilter = val)}
+              class="dt-chip {qualityFilter === val ? 'dt-chip-active' : ''}"
+            >{label}</button>
+          {/each}
+        </div>
+      </div>
+      <!-- Polarity + Sample -->
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div class="flex items-center gap-2">
+          <span class="dt-chip-label w-20 shrink-0">{get(dictionary).polarity}</span>
+          <div class="flex gap-1">
+            {#each [["all", "Всі"], ["positive", "+"], ["negative", "−"]] as [val, label]}
+              <button type="button" onclick={() => (polarityFilter = val)}
+                class="dt-chip {polarityFilter === val ? 'dt-chip-active' : ''}"
+              >{label}</button>
+            {/each}
+          </div>
+        </div>
+        {#if sampleOptions.length > 1}
+          <div class="flex items-center gap-2">
+            <span class="dt-chip-label shrink-0">{get(dictionary).sample}</span>
+            <div class="flex flex-wrap gap-1">
+              <button type="button" onclick={() => (sampleFilter = "all")}
+                class="dt-chip {sampleFilter === 'all' ? 'dt-chip-active' : ''}">Всі</button>
+              {#each sampleOptions as option}
+                <button type="button" onclick={() => (sampleFilter = option)}
+                  class="dt-chip {sampleFilter === option ? 'dt-chip-active' : ''}"
+                >{getSampleTypeLabel(option)}</button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
 
-  <label class="dt-filter-item">
-    <span>S/B ≥ {sbMin.toFixed(1)}</span>
-    <input type="range" min="0" max="20" step="0.1" bind:value={sbMin} />
-  </label>
+    <!-- Right: numeric sliders -->
+    <div class="flex flex-col justify-center gap-2 px-4 py-2.5">
+      <div class="dt-slider-row">
+        <span class="dt-slider-label">{get(dictionary).confidence} ≥</span>
+        <input type="range" min="0" max="100" step="1" bind:value={confidenceMin} class="dt-slider" />
+        <span class="dt-slider-val {confidenceMin > 0 ? 'dt-slider-val-active' : ''}">{confidenceMin}</span>
+      </div>
+      <div class="dt-slider-row">
+        <span class="dt-slider-label">CV% ≤</span>
+        <input type="range" min="0" max="100" step="1" bind:value={cvMax} class="dt-slider" />
+        <span class="dt-slider-val {cvMax < 100 ? 'dt-slider-val-active' : ''}">{cvMax}</span>
+      </div>
+      <div class="dt-slider-row">
+        <span class="dt-slider-label">S/B ≥</span>
+        <input type="range" min="0" max="20" step="0.1" bind:value={sbMin} class="dt-slider" />
+        <span class="dt-slider-val {sbMin > 0 ? 'dt-slider-val-active' : ''}">{sbMin.toFixed(1)}</span>
+      </div>
+    </div>
 
-  <label class="dt-filter-item">
-    <span>Search</span>
-    <input type="search" bind:value={searchQuery} placeholder="RT, m/z, статус..." />
-  </label>
+  </div>
 
-  <label class="dt-filter-item">
-    <span>Grouping</span>
-    <select bind:value={grouping}>
-      <option value="sample">Sample + Polarity</option>
-      <option value="status">Status</option>
-      <option value="none">None</option>
-    </select>
-  </label>
-
-  <button class="dt-reset-btn" onclick={resetDefaults}>Reset to defaults</button>
 </div>
 {/if}
 
@@ -474,68 +542,108 @@
     align-items: center;
   }
 
-  .dt-filter-item {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: #64748b;
-  }
-
-  .dt-filter-item select,
-  .dt-filter-item input[type="range"],
-  .dt-filter-item input[type="search"] {
+  /* ── Filter: search ───────────────────────────────────────── */
+  .dt-search-input {
     width: 100%;
-  }
-
-  .dt-filter-item select,
-  .dt-filter-item input[type="search"] {
-    border: 1px solid #cbd5e1;
-    border-radius: 0.7rem;
+    padding: 0.35rem 0.5rem 0.35rem 2rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.625rem;
     background: #fff;
     color: #0f172a;
-    font-size: 0.875rem;
-    padding: 0.45rem 0.6rem;
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .dt-search-input:focus { border-color: #93c5fd; }
+
+  :global(.dark .dt-search-input) {
+    background: #1e293b;
+    border-color: #475569;
+    color: #e2e8f0;
   }
 
-  .dt-reset-btn {
-    align-self: end;
-    border-radius: 0.7rem;
-    border: 1px solid #cbd5e1;
-    background: #fff;
-    color: #0f172a;
-    font-size: 0.875rem;
+  /* ── Filter: chip label ────────────────────────────────────── */
+  .dt-chip-label {
+    font-size: 0.7rem;
     font-weight: 600;
-    padding: 0.45rem 0.75rem;
-    transition: background-color 0.15s ease;
+    letter-spacing: 0.03em;
+    color: #94a3b8;
+    text-transform: uppercase;
   }
 
-  .dt-reset-btn:hover {
-    background: #e2e8f0;
+  /* ── Filter: chips ─────────────────────────────────────────── */
+  .dt-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .dt-chip:hover { border-color: #94a3b8; color: #0f172a; }
+
+  .dt-chip-active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  .dt-chip-active-green {
+    background: #059669;
+    border-color: #059669;
+    color: #fff;
+  }
+  .dt-chip-active-red {
+    background: #e11d48;
+    border-color: #e11d48;
+    color: #fff;
   }
 
-  :global(.dark .dt-filter-item) {
+  :global(.dark .dt-chip) {
+    background: #1e293b;
+    border-color: #334155;
     color: #94a3b8;
   }
+  :global(.dark .dt-chip:hover) { border-color: #64748b; color: #e2e8f0; }
+  :global(.dark .dt-chip-active) { background: #2563eb; border-color: #2563eb; color: #fff; }
+  :global(.dark .dt-chip-active-green) { background: #059669; border-color: #059669; color: #fff; }
+  :global(.dark .dt-chip-active-red) { background: #be123c; border-color: #be123c; color: #fff; }
 
-  :global(.dark .dt-filter-item select),
-  :global(.dark .dt-filter-item input[type="search"]) {
-    border-color: #475569;
-    background: #1e293b;
-    color: #e2e8f0;
+  /* ── Filter: sliders ───────────────────────────────────────── */
+  .dt-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
-
-  :global(.dark .dt-reset-btn) {
-    border-color: #475569;
-    background: #1e293b;
-    color: #e2e8f0;
+  .dt-slider-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #94a3b8;
+    white-space: nowrap;
+    width: 4.5rem;
+    flex-shrink: 0;
   }
-
-  :global(.dark .dt-reset-btn:hover) {
-    background: #334155;
+  .dt-slider {
+    flex: 1;
+    height: 3px;
+    accent-color: #2563eb;
+    cursor: pointer;
   }
+  .dt-slider-val {
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    min-width: 2.2rem;
+    text-align: right;
+    color: #94a3b8;
+    transition: color 0.15s;
+  }
+  .dt-slider-val-active { color: #2563eb; }
 
   /* Page length select */
   :global(.peaks-dt .dt-length select) {
@@ -622,8 +730,9 @@
     background: #f8fafc;
     color: #475569;
     font-weight: 600;
+    font-size: 0.72rem;
     text-align: left;
-    padding: 0.5rem 0.7rem;
+    padding: 0.4rem 0.6rem;
     border-bottom: 1px solid #e2e8f0;
     white-space: nowrap;
     cursor: pointer;
@@ -762,8 +871,9 @@
     color: #dbeafe;
   }
   :global(.peaks-dt table.dataTable tbody td) {
-    padding: 0.5rem 0.7rem;
+    padding: 0.4rem 0.6rem;
     vertical-align: middle;
+    font-size: 0.72rem;
   }
   :global(.peaks-dt table.dataTable.no-footer) {
     border-bottom: none;

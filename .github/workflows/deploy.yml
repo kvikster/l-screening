@@ -21,27 +21,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: frontend/src/lib/screening-wasm
+          workspaces: app/src/lib/screening-wasm
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
-      - name: Install frontend dependencies
+      - name: Install app dependencies
         run: bun install
-        working-directory: frontend
+        working-directory: app
 
       - name: Build PWA
         run: bun run build
-        working-directory: frontend
+        working-directory: app
         env:
           PUBLIC_BASE_PATH: /l-screening
 
       - name: Add .nojekyll
-        run: touch frontend/build/.nojekyll
+        run: touch app/build/.nojekyll
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: frontend/build
+          publish_dir: app/build
           force_orphan: true

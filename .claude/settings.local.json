@@ -1,22 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Read(//Users/vkey/Documents/l-screening/$HOME/.cargo/**)",
-      "Bash(source \"$HOME/.cargo/env\")",
-      "Bash(cargo --version)",
-      "Bash(cargo build:*)",
-      "Bash(cargo doc:*)",
-      "Bash(cargo tree:*)",
-      "Bash(cargo search:*)",
-      "Bash(cargo info:*)",
       "mcp__Context7__resolve-library-id",
       "mcp__Context7__query-docs",
-      "Bash(timeout 10 cargo run --features pytauri-standalone)",
-      "Bash(pkill -f \"lc-ms-screening\")",
       "mcp__context7__resolve-library-id",
       "mcp__context7__query-docs",
       "Bash(gh api:*)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(bun add:*)",
+      "Bash(bun run:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "Bash(cat /Users/vkey/Documents/l-screening/.github/workflows/*.yml)",
+      "Bash(wc -l /Users/vkey/Documents/l-screening/app/src/lib/components/*.svelte /Users/vkey/Documents/l-screening/app/src/lib/components/ui/*.svelte)",
+      "Bash(wc -l /Users/vkey/Documents/l-screening/app/src/lib/components/*.svelte)"
     ]
   }
 }

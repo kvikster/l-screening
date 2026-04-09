@@ -10,7 +10,7 @@ BASE_PATH="/$REPO_NAME"
 echo "Building PWA for $REPO_NAME (base: $BASE_PATH)..."
 
 # Build
-cd frontend
+cd app
 bun run build:wasm
 PUBLIC_BASE_PATH="$BASE_PATH" bunx vite build
 cd ..
@@ -28,7 +28,7 @@ else
 fi
 
 # Copy build output, preserve .nojekyll to allow _ prefixed files on GH Pages
-cp -r frontend/build/. "$DEPLOY_DIR/"
+cp -r app/build/. "$DEPLOY_DIR/"
 touch "$DEPLOY_DIR/.nojekyll"
 
 cd "$DEPLOY_DIR"
