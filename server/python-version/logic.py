@@ -13,7 +13,7 @@ DEFAULT_SIGNAL_TO_BLANK_MIN = 3.0
 DEFAULT_CV_HIGH_MAX = 15.0
 DEFAULT_CV_MODERATE_MAX = 30.0
 
-# Maps operator_mark → canonical SampleType used throughout the pipeline.
+# Maps operator_mark → canonical SampleType used throughout the raw-stage pipeline.
 # Reps 1 & 2 collapse to the same SampleType so they are paired in coarse_screen.
 _MARK_TO_STYPE = {
     "blank_positive": "blank",
@@ -23,7 +23,7 @@ _MARK_TO_STYPE = {
 }
 
 # Which operator_mark values count as "replicate 1" vs "replicate 2"
-_REP1_MARKS = {"sample_rep1", "blank_positive"}  # arbitrary but consistent
+_REP1_MARKS = {"sample_rep1", "blank_positive"}
 _REP2_MARKS = {"sample_rep2", "blank_negative"}
 
 
@@ -86,17 +86,39 @@ def _classify_from_filename(filename: str) -> str:
 
 
 def _assign_sample_type(row: pd.Series) -> str:
-    """Use operator_mark when present, fall back to filename heuristic."""
     mark = row.get("operator_mark")
     if mark and mark in _MARK_TO_STYPE:
         return _MARK_TO_STYPE[mark]
     return _classify_from_filename(row["File"])
 
 
+def _parallel_sample_family(sample_type: str | None) -> str:
+    value = str(sample_type or "unknown")
+    if value == "blank":
+        return "blank"
+    if value.startswith("sample"):
+        return "sample"
+    return value
+
+
 def _safe_round(value: float | None, digits: int) -> float | None:
     if value is None or pd.isna(value):
         return None
     return round(float(value), digits)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ppm_delta(mz_a: float, mz_b: float) -> float:
@@ -146,15 +168,19 @@ def _classify_replicate_quality(cv_percent: float | None, config: ScreeningConfi
 def _replicate_confidence_score(
     rt_delta: float,
     rt_tol: float,
-    mz_delta_in_mode: float,
+    mz_delta_in_mode: float | None,
     mz_tol: float,
     cv_percent: float | None,
     color_paired: bool,
+    use_mz: bool,
     config: ScreeningConfig,
 ) -> float:
     score = 100.0
     score -= _fraction_of_tol(rt_delta, rt_tol) * 20
-    score -= _fraction_of_tol(mz_delta_in_mode, mz_tol) * 25
+    if use_mz and mz_delta_in_mode is not None:
+        score -= _fraction_of_tol(mz_delta_in_mode, mz_tol) * 25
+    else:
+        score -= 10
 
     if cv_percent is None:
         score -= 10
@@ -189,6 +215,41 @@ def _final_confidence_score(
         score -= 15 + min(30, deficit * 30)
 
     return round(max(0.0, min(score, 100.0)), 1)
+
+
+def _match_metrics(
+    rt_a: float,
+    mz_a: float | None,
+    rt_b: float,
+    mz_b: float | None,
+    rt_tol: float,
+    mz_tol: float,
+    mz_mode: str,
+) -> Dict[str, Any]:
+    rt_delta = abs(float(rt_a) - float(rt_b))
+    uses_mz = mz_a is not None and mz_b is not None
+    if uses_mz:
+        mz_delta_da = abs(float(mz_a) - float(mz_b))
+        mz_delta_ppm = _ppm_delta(float(mz_a), float(mz_b))
+        mz_delta_in_mode = _mz_delta(float(mz_a), float(mz_b), mz_mode)
+        matches = rt_delta <= rt_tol and mz_delta_in_mode <= mz_tol
+        distance = _fraction_of_tol(rt_delta, rt_tol) + _fraction_of_tol(mz_delta_in_mode, mz_tol)
+    else:
+        mz_delta_da = None
+        mz_delta_ppm = None
+        mz_delta_in_mode = None
+        matches = rt_delta <= rt_tol
+        distance = _fraction_of_tol(rt_delta, rt_tol)
+
+    return {
+        "matches": matches,
+        "uses_mz": uses_mz,
+        "rt_delta": rt_delta,
+        "mz_delta_da": mz_delta_da,
+        "mz_delta_ppm": mz_delta_ppm,
+        "mz_delta_in_mode": mz_delta_in_mode,
+        "distance": distance,
+    }
 
 
 def _pair_replicates(group: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, bool]:
@@ -228,49 +289,39 @@ def _split_replicate_buckets(group: pd.DataFrame) -> Tuple[List[Tuple[str, pd.Da
     return buckets, use_marks
 
 
-def _candidate_distance(row_a: pd.Series, row_b: pd.Series, config: ScreeningConfig) -> tuple[bool, Dict[str, float]]:
-    rt_delta = abs(float(row_a["RT"]) - float(row_b["RT"]))
-    mz_delta_da = abs(float(row_a["Base Peak"]) - float(row_b["Base Peak"]))
-    mz_delta_ppm = _ppm_delta(float(row_a["Base Peak"]), float(row_b["Base Peak"]))
-    mz_delta_in_mode = _mz_delta(float(row_a["Base Peak"]), float(row_b["Base Peak"]), config.replicate_mz_mode)
-    matches = rt_delta <= config.replicate_rt_tol and mz_delta_in_mode <= config.replicate_mz_tol
-    distance = _fraction_of_tol(rt_delta, config.replicate_rt_tol) + _fraction_of_tol(
-        mz_delta_in_mode, config.replicate_mz_tol
+def _candidate_distance(row_a: pd.Series, row_b: pd.Series, config: ScreeningConfig) -> Dict[str, Any]:
+    return _match_metrics(
+        rt_a=float(row_a["RT"]),
+        mz_a=_optional_float(row_a.get("Base Peak")),
+        rt_b=float(row_b["RT"]),
+        mz_b=_optional_float(row_b.get("Base Peak")),
+        rt_tol=config.replicate_rt_tol,
+        mz_tol=config.replicate_mz_tol,
+        mz_mode=config.replicate_mz_mode,
     )
-    return matches, {
-        "rt_delta": rt_delta,
-        "mz_delta_da": mz_delta_da,
-        "mz_delta_ppm": mz_delta_ppm,
-        "mz_delta_in_mode": mz_delta_in_mode,
-        "distance": distance,
-    }
 
 
-def _cluster_centroid(rows: List[pd.Series]) -> Dict[str, float]:
+def _cluster_centroid(rows: List[pd.Series]) -> Dict[str, float | None]:
+    mz_values = [_optional_float(row.get("Base Peak")) for row in rows]
+    clean_mz = [value for value in mz_values if value is not None]
     return {
         "RT": sum(float(row["RT"]) for row in rows) / len(rows),
-        "Base Peak": sum(float(row["Base Peak"]) for row in rows) / len(rows),
+        "Base Peak": sum(clean_mz) / len(clean_mz) if clean_mz else None,
     }
 
 
 def _cluster_match_to_centroid(
-    centroid: Dict[str, float], candidate: pd.Series, config: ScreeningConfig
-) -> tuple[bool, Dict[str, float]]:
-    rt_delta = abs(float(candidate["RT"]) - centroid["RT"])
-    mz_delta_da = abs(float(candidate["Base Peak"]) - centroid["Base Peak"])
-    mz_delta_ppm = _ppm_delta(float(candidate["Base Peak"]), centroid["Base Peak"])
-    mz_delta_in_mode = _mz_delta(float(candidate["Base Peak"]), centroid["Base Peak"], config.replicate_mz_mode)
-    matches = rt_delta <= config.replicate_rt_tol and mz_delta_in_mode <= config.replicate_mz_tol
-    distance = _fraction_of_tol(rt_delta, config.replicate_rt_tol) + _fraction_of_tol(
-        mz_delta_in_mode, config.replicate_mz_tol
+    centroid: Dict[str, float | None], candidate: pd.Series, config: ScreeningConfig
+) -> Dict[str, Any]:
+    return _match_metrics(
+        rt_a=float(candidate["RT"]),
+        mz_a=_optional_float(candidate.get("Base Peak")),
+        rt_b=float(centroid["RT"]),
+        mz_b=_optional_float(centroid.get("Base Peak")),
+        rt_tol=config.replicate_rt_tol,
+        mz_tol=config.replicate_mz_tol,
+        mz_mode=config.replicate_mz_mode,
     )
-    return matches, {
-        "rt_delta": rt_delta,
-        "mz_delta_da": mz_delta_da,
-        "mz_delta_ppm": mz_delta_ppm,
-        "mz_delta_in_mode": mz_delta_in_mode,
-        "distance": distance,
-    }
 
 
 def _choose_cluster_members(
@@ -300,8 +351,8 @@ def _choose_cluster_members(
             index_key = (bucket_idx, int(row_index))
             if index_key in used_indices:
                 continue
-            matches, metrics = _cluster_match_to_centroid(centroid, candidate, config)
-            if not matches:
+            metrics = _cluster_match_to_centroid(centroid, candidate, config)
+            if not metrics["matches"]:
                 continue
             contender = {
                 "bucket_name": bucket_name,
@@ -336,20 +387,54 @@ def _pairwise_cluster_metrics(rows: List[pd.Series], config: ScreeningConfig) ->
 
     for left in range(len(rows)):
         for right in range(left + 1, len(rows)):
-            _, metrics = _candidate_distance(rows[left], rows[right], config)
+            metrics = _candidate_distance(rows[left], rows[right], config)
             rt_deltas.append(metrics["rt_delta"])
-            mz_deltas_da.append(metrics["mz_delta_da"])
-            mz_deltas_ppm.append(metrics["mz_delta_ppm"])
-            mz_deltas_in_mode.append(metrics["mz_delta_in_mode"])
+            if metrics["uses_mz"]:
+                mz_deltas_da.append(float(metrics["mz_delta_da"]))
+                mz_deltas_ppm.append(float(metrics["mz_delta_ppm"]))
+                mz_deltas_in_mode.append(float(metrics["mz_delta_in_mode"]))
 
     return {
+        "uses_mz": bool(mz_deltas_in_mode),
         "max_rt_delta": max(rt_deltas, default=0.0),
-        "max_mz_delta_da": max(mz_deltas_da, default=0.0),
-        "max_mz_delta_ppm": max(mz_deltas_ppm, default=0.0),
-        "max_mz_delta_in_mode": max(mz_deltas_in_mode, default=0.0),
+        "max_mz_delta_da": max(mz_deltas_da, default=None),
+        "max_mz_delta_ppm": max(mz_deltas_ppm, default=None),
+        "max_mz_delta_in_mode": max(mz_deltas_in_mode, default=None),
         "mean_rt_delta": sum(rt_deltas) / len(rt_deltas) if rt_deltas else 0.0,
-        "mean_mz_delta_in_mode": sum(mz_deltas_in_mode) / len(mz_deltas_in_mode) if mz_deltas_in_mode else 0.0,
+        "mean_mz_delta_in_mode": sum(mz_deltas_in_mode) / len(mz_deltas_in_mode) if mz_deltas_in_mode else None,
     }
+
+
+def _compact_list(values: List[Any]) -> List[Any]:
+    return [value for value in values if value is not None and not (isinstance(value, float) and pd.isna(value))]
+
+
+def _weighted_mean(values: List[float | None], weights: List[int]) -> float | None:
+    weighted_total = 0.0
+    total_weight = 0
+    for value, weight in zip(values, weights):
+        numeric_value = _optional_float(value)
+        numeric_weight = int(weight)
+        if numeric_value is None or numeric_weight <= 0:
+            continue
+        weighted_total += numeric_value * numeric_weight
+        total_weight += numeric_weight
+    if total_weight == 0:
+        return None
+    return weighted_total / total_weight
+
+
+def _replicate_area_values(row: Dict[str, Any]) -> List[float]:
+    """Extract per-replicate area values from a coarse-level row's Why.ReplicateArea.values.
+
+    NOTE: This reads from ``"ReplicateArea"``, not ``"Area"`` (used by parallel merge).
+    It is safe to call only on coarse-level rows; parallel-merged rows fall through
+    to the ``[Area_mean] * ReplicateCount`` fallback.
+    """
+    values = row.get("Why", {}).get("ReplicateArea", {}).get("values", [])
+    if not isinstance(values, list):
+        return []
+    return [float(value) for value in _compact_list(values)]
 
 
 def _cluster_to_confirmed_row(
@@ -360,11 +445,12 @@ def _cluster_to_confirmed_row(
     rows = [member["row"] for member in members]
     area_values = [float(row["Area"]) for row in rows]
     rt_values = [float(row["RT"]) for row in rows]
-    mz_values = [float(row["Base Peak"]) for row in rows]
+    mz_values = _compact_list([_optional_float(row.get("Base Peak")) for row in rows])
     area_mean = sum(area_values) / len(area_values)
     area_cv_pct = _calc_cv_percent(area_values)
     replicate_quality = _classify_replicate_quality(area_cv_pct, config)
     pairwise_metrics = _pairwise_cluster_metrics(rows, config)
+    matching_mode = "RT+MZ" if pairwise_metrics["uses_mz"] else "RT"
     replicate_score = _replicate_confidence_score(
         rt_delta=pairwise_metrics["mean_rt_delta"],
         rt_tol=config.replicate_rt_tol,
@@ -372,6 +458,7 @@ def _cluster_to_confirmed_row(
         mz_tol=config.replicate_mz_tol,
         cv_percent=area_cv_pct,
         color_paired=colour_split,
+        use_mz=pairwise_metrics["uses_mz"],
         config=config,
     )
 
@@ -385,7 +472,7 @@ def _cluster_to_confirmed_row(
     return {
         "Group": f"{first_row['SampleType']}_{first_row['Polarity']}",
         "RT_mean": _safe_round(sum(rt_values) / len(rt_values), 4),
-        "MZ_mean": _safe_round(sum(mz_values) / len(mz_values), 6),
+        "MZ_mean": _safe_round(sum(mz_values) / len(mz_values), 6) if mz_values else None,
         "Area_mean": _safe_round(area_mean, 2),
         "AreaCVPct": _safe_round(area_cv_pct, 2),
         "ReplicateQuality": replicate_quality,
@@ -405,8 +492,14 @@ def _cluster_to_confirmed_row(
         "ReplicateMarks": replicate_marks,
         "ReplicateColors": replicate_colors,
         "Confirmed": "Yes",
+        "MatchingMode": matching_mode,
+        "ParallelMatch": False,
+        "ParallelSampleCount": 1,
+        "ParallelSourceSamples": [str(first_row["SampleType"])],
+        "BlankAreaMean": None,
+        "AreaDifference": None,
         "Why": {
-            "ReplicateStrategy": "greedy_cluster",
+            "ReplicateStrategy": "greedy_cluster_with_singleton_carryover",
             "ReplicateBuckets": [member["bucket_name"] for member in members],
             "ReplicateCount": len(rows),
             "ReplicateMembers": [
@@ -417,7 +510,7 @@ def _cluster_to_confirmed_row(
                     "operator_mark": row.get("operator_mark"),
                     "operator_color": row.get("operator_color"),
                     "rt": _safe_round(row.get("RT"), 4),
-                    "mz": _safe_round(row.get("Base Peak"), 6),
+                    "mz": _safe_round(_optional_float(row.get("Base Peak")), 6),
                     "area": _safe_round(row.get("Area"), 2),
                 }
                 for member, row in [(member, member["row"]) for member in members]
@@ -429,11 +522,12 @@ def _cluster_to_confirmed_row(
                 "unit": "min",
             },
             "ReplicateMZ": {
-                "mean": _safe_round(sum(mz_values) / len(mz_values), 6),
+                "mean": _safe_round(sum(mz_values) / len(mz_values), 6) if mz_values else None,
                 "max_delta_da": _safe_round(pairwise_metrics["max_mz_delta_da"], 6),
                 "max_delta_ppm": _safe_round(pairwise_metrics["max_mz_delta_ppm"], 2),
                 "tolerance": config.replicate_mz_tol,
                 "mode": config.replicate_mz_mode,
+                "used": pairwise_metrics["uses_mz"],
             },
             "ReplicateArea": {
                 "values": [_safe_round(value, 2) for value in area_values],
@@ -443,7 +537,8 @@ def _cluster_to_confirmed_row(
             "ReplicateQuality": replicate_quality,
             "ReplicateConfidenceScore": replicate_score,
             "ColorPaired": colour_split,
-            "Matches": True,
+            "Matches": len(rows) > 1,
+            "MatchingMode": matching_mode,
             "ThresholdProfile": {
                 "replicate_rt_tol": config.replicate_rt_tol,
                 "replicate_mz_tol": config.replicate_mz_tol,
@@ -458,14 +553,8 @@ def _cluster_to_confirmed_row(
 
 
 def coarse_screen(group: pd.DataFrame, config: ScreeningConfig) -> pd.DataFrame:
-    """
-    Greedily cluster one peak per replicate bucket within the same
-    (SampleType, Polarity) group. Buckets are colour-driven when that
-    yields an unambiguous two-replicate split; otherwise each file acts
-    as its own replicate bucket so n > 2 files are supported.
-    """
     buckets, colour_split = _split_replicate_buckets(group)
-    if len(buckets) < 2:
+    if not buckets:
         return pd.DataFrame()
 
     used_indices: set[tuple[int, int]] = set()
@@ -485,7 +574,7 @@ def coarse_screen(group: pd.DataFrame, config: ScreeningConfig) -> pd.DataFrame:
         key=lambda item: (
             -item["area"],
             float(item["row"]["RT"]),
-            float(item["row"]["Base Peak"]),
+            _optional_float(item["row"].get("Base Peak")) or 0.0,
         )
     )
 
@@ -509,34 +598,53 @@ def coarse_screen(group: pd.DataFrame, config: ScreeningConfig) -> pd.DataFrame:
             used_indices.add((member["bucket_index"], member["row_index"]))
         confirmed.append(_cluster_to_confirmed_row(members, colour_split, config))
 
+    for seed in seed_candidates:
+        seed_key = (seed["bucket_idx"], seed["row_index"])
+        if seed_key in used_indices:
+            continue
+        used_indices.add(seed_key)
+        confirmed.append(
+            _cluster_to_confirmed_row(
+                [
+                    {
+                        "bucket_name": buckets[seed["bucket_idx"]][0],
+                        "bucket_index": seed["bucket_idx"],
+                        "row_index": seed["row_index"],
+                        "row": seed["row"],
+                        "distance": 0.0,
+                    }
+                ],
+                colour_split,
+                config,
+            )
+        )
+
     return pd.DataFrame(confirmed)
 
 
-def _blank_candidates(peak: pd.Series, blanks: pd.DataFrame, config: ScreeningConfig) -> List[Dict[str, Any]]:
+def _blank_candidates(peak: pd.Series | Dict[str, Any], blanks: pd.DataFrame, config: ScreeningConfig) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     peak_rt = float(peak["RT_mean"])
-    peak_mz = float(peak["MZ_mean"])
+    peak_mz = _optional_float(peak.get("MZ_mean"))
 
     for _, blank in blanks[blanks["Polarity"] == peak["Polarity"]].iterrows():
-        rt_delta = abs(float(blank["RT_mean"]) - peak_rt)
-        mz_delta_da = abs(float(blank["MZ_mean"]) - peak_mz)
-        mz_delta_ppm = _ppm_delta(float(blank["MZ_mean"]), peak_mz)
-        mz_delta_in_mode = _mz_delta(float(blank["MZ_mean"]), peak_mz, config.blank_mz_mode)
+        metrics = _match_metrics(
+            rt_a=float(blank["RT_mean"]),
+            mz_a=_optional_float(blank.get("MZ_mean")),
+            rt_b=peak_rt,
+            mz_b=peak_mz,
+            rt_tol=config.blank_rt_tol,
+            mz_tol=config.blank_mz_tol,
+            mz_mode=config.blank_mz_mode,
+        )
 
-        if rt_delta > config.blank_rt_tol or mz_delta_in_mode > config.blank_mz_tol:
+        if not metrics["matches"]:
             continue
 
-        distance = _fraction_of_tol(rt_delta, config.blank_rt_tol) + _fraction_of_tol(
-            mz_delta_in_mode, config.blank_mz_tol
-        )
         candidates.append(
             {
                 "blank_row": blank,
-                "rt_delta": rt_delta,
-                "mz_delta_da": mz_delta_da,
-                "mz_delta_ppm": mz_delta_ppm,
-                "mz_delta_in_mode": mz_delta_in_mode,
-                "distance": distance,
+                **metrics,
             }
         )
 
@@ -549,6 +657,344 @@ def _blank_candidates(peak: pd.Series, blanks: pd.DataFrame, config: ScreeningCo
     return candidates
 
 
+def _final_row_match_to_centroid(
+    centroid: Dict[str, float | None], candidate: Dict[str, Any], config: ScreeningConfig
+) -> Dict[str, Any]:
+    return _match_metrics(
+        rt_a=float(candidate["RT_mean"]),
+        mz_a=_optional_float(candidate.get("MZ_mean")),
+        rt_b=float(centroid["RT_mean"]),
+        mz_b=_optional_float(centroid.get("MZ_mean")),
+        rt_tol=config.replicate_rt_tol,
+        mz_tol=config.replicate_mz_tol,
+        mz_mode=config.replicate_mz_mode,
+    )
+
+
+def _final_centroid(rows: List[Dict[str, Any]]) -> Dict[str, float | None]:
+    mz_values = _compact_list([_optional_float(row.get("MZ_mean")) for row in rows])
+    return {
+        "RT_mean": sum(float(row["RT_mean"]) for row in rows) / len(rows),
+        "MZ_mean": sum(mz_values) / len(mz_values) if mz_values else None,
+    }
+
+
+def _choose_parallel_members(
+    seed_row: Dict[str, Any],
+    seed_row_idx: int,
+    seed_bucket_idx: int,
+    buckets: List[Tuple[str, List[Dict[str, Any]]]],
+    used_indices: set[tuple[int, int]],
+    config: ScreeningConfig,
+) -> List[Dict[str, Any]]:
+    members = [
+        {
+            "bucket_name": buckets[seed_bucket_idx][0],
+            "bucket_index": seed_bucket_idx,
+            "row_index": seed_row_idx,
+            "row": seed_row,
+            "distance": 0.0,
+        }
+    ]
+    centroid = _final_centroid([seed_row])
+
+    for bucket_idx, (bucket_name, bucket_rows) in enumerate(buckets):
+        if bucket_idx == seed_bucket_idx:
+            continue
+
+        best_candidate: Dict[str, Any] | None = None
+        for row_index, candidate in enumerate(bucket_rows):
+            index_key = (bucket_idx, row_index)
+            if index_key in used_indices:
+                continue
+            metrics = _final_row_match_to_centroid(centroid, candidate, config)
+            if not metrics["matches"]:
+                continue
+            contender = {
+                "bucket_name": bucket_name,
+                "bucket_index": bucket_idx,
+                "row_index": row_index,
+                "row": candidate,
+                "distance": metrics["distance"],
+                "metrics": metrics,
+            }
+            if (
+                best_candidate is None
+                or contender["distance"] < best_candidate["distance"]
+                or (
+                    contender["distance"] == best_candidate["distance"]
+                    and float(candidate["Area_mean"]) > float(best_candidate["row"]["Area_mean"])
+                )
+            ):
+                best_candidate = contender
+
+        if best_candidate is not None:
+            members.append(best_candidate)
+            centroid = _final_centroid([member["row"] for member in members])
+
+    return members
+
+
+def _merge_parallel_cluster(
+    members: List[Dict[str, Any]],
+    family: str,
+    polarity: str,
+    config: ScreeningConfig,
+) -> Dict[str, Any]:
+    rows = [member["row"] for member in members]
+    replicate_counts = [int(row.get("ReplicateCount") or 0) for row in rows]
+    rt_values = [float(row["RT_mean"]) for row in rows]
+    mz_row_values = [_optional_float(row.get("MZ_mean")) for row in rows]
+    source_area_means = [float(row["Area_mean"]) for row in rows]
+    replicate_area_values = [
+        area
+        for row in rows
+        for area in (
+            _replicate_area_values(row)
+            or [float(row["Area_mean"])] * max(int(row.get("ReplicateCount") or 0), 1)
+        )
+    ]
+    rt_mean = _weighted_mean(rt_values, replicate_counts) or 0.0
+    mz_mean = _weighted_mean(mz_row_values, replicate_counts)
+    area_mean = _weighted_mean(source_area_means, replicate_counts) or 0.0
+    area_cv_pct = _calc_cv_percent(replicate_area_values)
+    total_replicates = int(sum(replicate_counts))
+    source_sample_types = sorted({str(row.get("SampleType") or family) for row in rows})
+    replicate_files = [item for row in rows for item in row.get("ReplicateFiles", [])]
+    replicate_labels = [item for row in rows for item in row.get("ReplicateLabels", [])]
+    replicate_marks = [item for row in rows for item in row.get("ReplicateMarks", [])]
+    replicate_colors = [item for row in rows for item in row.get("ReplicateColors", [])]
+    pairwise_metrics = {
+        "uses_mz": False,
+        "max_rt_delta": 0.0,
+        "max_mz_delta_da": None,
+        "max_mz_delta_ppm": None,
+        "mean_rt_delta": 0.0,
+        "mean_mz_delta_in_mode": None,
+    }
+    if len(rows) > 1:
+        rt_deltas: List[float] = []
+        mz_deltas_da: List[float] = []
+        mz_deltas_ppm: List[float] = []
+        mz_deltas_in_mode: List[float] = []
+        for left in range(len(rows)):
+            for right in range(left + 1, len(rows)):
+                metrics = _match_metrics(
+                    rt_a=float(rows[left]["RT_mean"]),
+                    mz_a=_optional_float(rows[left].get("MZ_mean")),
+                    rt_b=float(rows[right]["RT_mean"]),
+                    mz_b=_optional_float(rows[right].get("MZ_mean")),
+                    rt_tol=config.replicate_rt_tol,
+                    mz_tol=config.replicate_mz_tol,
+                    mz_mode=config.replicate_mz_mode,
+                )
+                rt_deltas.append(metrics["rt_delta"])
+                if metrics["uses_mz"]:
+                    mz_deltas_da.append(float(metrics["mz_delta_da"]))
+                    mz_deltas_ppm.append(float(metrics["mz_delta_ppm"]))
+                    mz_deltas_in_mode.append(float(metrics["mz_delta_in_mode"]))
+        pairwise_metrics = {
+            "uses_mz": bool(mz_deltas_in_mode),
+            "max_rt_delta": max(rt_deltas, default=0.0),
+            "max_mz_delta_da": max(mz_deltas_da, default=None),
+            "max_mz_delta_ppm": max(mz_deltas_ppm, default=None),
+            "mean_rt_delta": sum(rt_deltas) / len(rt_deltas) if rt_deltas else 0.0,
+            "mean_mz_delta_in_mode": sum(mz_deltas_in_mode) / len(mz_deltas_in_mode) if mz_deltas_in_mode else None,
+        }
+
+    matching_mode = "RT+MZ" if pairwise_metrics["uses_mz"] and all(row.get("MatchingMode") == "RT+MZ" for row in rows) else "RT"
+    replicate_quality = _classify_replicate_quality(area_cv_pct, config)
+    replicate_score = _replicate_confidence_score(
+        rt_delta=pairwise_metrics["mean_rt_delta"],
+        rt_tol=config.replicate_rt_tol,
+        mz_delta_in_mode=pairwise_metrics["mean_mz_delta_in_mode"],
+        mz_tol=config.replicate_mz_tol,
+        cv_percent=area_cv_pct,
+        color_paired=len(source_sample_types) > 1,
+        use_mz=pairwise_metrics["uses_mz"],
+        config=config,
+    )
+
+    all_labels = replicate_labels + [row.get("Rep1_Label") for row in rows] + [row.get("Rep2_Label") for row in rows]
+    all_marks = replicate_marks + [row.get("Rep1_Mark") for row in rows] + [row.get("Rep2_Mark") for row in rows]
+    all_colors = replicate_colors + [row.get("Rep1_Color") for row in rows] + [row.get("Rep2_Color") for row in rows]
+    compact_labels = _compact_list(all_labels)
+    compact_marks = _compact_list(all_marks)
+    compact_colors = _compact_list(all_colors)
+
+    return {
+        "Group": f"{family}_{polarity}",
+        "RT_mean": _safe_round(rt_mean, 4),
+        "MZ_mean": _safe_round(mz_mean, 6),
+        "Area_mean": _safe_round(area_mean, 2),
+        "AreaCVPct": _safe_round(area_cv_pct, 2),
+        "ReplicateQuality": replicate_quality,
+        "ReplicateCount": total_replicates,
+        "ReplicateConfidenceScore": replicate_score,
+        "ConfidenceScore": replicate_score,
+        "Polarity": polarity,
+        "SampleType": family,
+        "Rep1_Label": compact_labels[0] if len(compact_labels) > 0 else None,
+        "Rep2_Label": compact_labels[1] if len(compact_labels) > 1 else None,
+        "Rep1_Mark": compact_marks[0] if len(compact_marks) > 0 else None,
+        "Rep2_Mark": compact_marks[1] if len(compact_marks) > 1 else None,
+        "Rep1_Color": compact_colors[0] if len(compact_colors) > 0 else None,
+        "Rep2_Color": compact_colors[1] if len(compact_colors) > 1 else None,
+        "ReplicateFiles": replicate_files,
+        "ReplicateLabels": replicate_labels,
+        "ReplicateMarks": replicate_marks,
+        "ReplicateColors": replicate_colors,
+        "Confirmed": "Yes",
+        "MatchingMode": matching_mode,
+        "ParallelMatch": len(source_sample_types) > 1,
+        "ParallelSampleCount": len(source_sample_types),
+        "ParallelSourceSamples": source_sample_types,
+        "BlankAreaMean": None,
+        "AreaDifference": None,
+        "Why": {
+            "ParallelMerge": {
+                "Strategy": "greedy_cluster_union",
+                "SourceSamples": source_sample_types,
+                "ParallelSampleCount": len(source_sample_types),
+                "MatchedAcrossSamples": len(source_sample_types) > 1,
+                "MatchingMode": matching_mode,
+                "RT": {
+                    "mean": _safe_round(rt_mean, 4),
+                    "max_delta": _safe_round(pairwise_metrics["max_rt_delta"], 4),
+                    "tolerance": config.replicate_rt_tol,
+                },
+                "MZ": {
+                    "mean": _safe_round(mz_mean, 6),
+                    "max_delta_da": _safe_round(pairwise_metrics["max_mz_delta_da"], 6),
+                    "max_delta_ppm": _safe_round(pairwise_metrics["max_mz_delta_ppm"], 2),
+                    "tolerance": config.replicate_mz_tol,
+                    "mode": config.replicate_mz_mode,
+                    "used": pairwise_metrics["uses_mz"],
+                },
+                "Area": {
+                    "values": [_safe_round(value, 2) for value in replicate_area_values],
+                    "mean": _safe_round(area_mean, 2),
+                },
+                "SourceRows": [
+                    {
+                        "SampleType": row.get("SampleType"),
+                        "RT_mean": _safe_round(row.get("RT_mean"), 4),
+                        "MZ_mean": _safe_round(_optional_float(row.get("MZ_mean")), 6),
+                        "Area_mean": _safe_round(row.get("Area_mean"), 2),
+                        "ReplicateCount": row.get("ReplicateCount"),
+                        "MatchingMode": row.get("MatchingMode"),
+                    }
+                    for row in rows
+                ],
+                "SourceWhy": [row.get("Why") for row in rows],
+            },
+            "ReplicateConfidenceScore": replicate_score,
+            "ThresholdProfile": {
+                "replicate_rt_tol": config.replicate_rt_tol,
+                "replicate_mz_tol": config.replicate_mz_tol,
+                "replicate_mz_mode": config.replicate_mz_mode,
+                "blank_rt_tol": config.blank_rt_tol,
+                "blank_mz_tol": config.blank_mz_tol,
+                "blank_mz_mode": config.blank_mz_mode,
+                "signal_to_blank_min": config.signal_to_blank_min,
+            },
+        },
+    }
+
+
+def _parallel_merge_samples(samples: List[Dict[str, Any]], config: ScreeningConfig) -> List[Dict[str, Any]]:
+    grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for row in samples:
+        family = _parallel_sample_family(row.get("SampleType"))
+        key = (family, str(row.get("Polarity")))
+        grouped.setdefault(key, []).append(row)
+
+    merged: List[Dict[str, Any]] = []
+    for (family, polarity), rows in grouped.items():
+        bucket_map: Dict[str, List[Dict[str, Any]]] = {}
+        bucket_order: List[str] = []
+        for row in rows:
+            bucket_name = str(row.get("SampleType") or family)
+            if bucket_name not in bucket_map:
+                bucket_order.append(bucket_name)
+                bucket_map[bucket_name] = []
+            bucket_map[bucket_name].append(row)
+
+        buckets = [(bucket_name, bucket_map[bucket_name]) for bucket_name in bucket_order]
+
+        seed_candidates: List[Dict[str, Any]] = []
+        for bucket_idx, (_, bucket_rows) in enumerate(buckets):
+            for row_index, row in enumerate(bucket_rows):
+                seed_candidates.append(
+                    {
+                        "bucket_idx": bucket_idx,
+                        "row_index": row_index,
+                        "row": row,
+                        "area": float(row["Area_mean"]),
+                    }
+                )
+
+        seed_candidates.sort(
+            key=lambda item: (
+                -item["area"],
+                float(item["row"]["RT_mean"]),
+                _optional_float(item["row"].get("MZ_mean")) or 0.0,
+            )
+        )
+
+        used_indices: set[tuple[int, int]] = set()
+        for seed in seed_candidates:
+            seed_key = (seed["bucket_idx"], seed["row_index"])
+            if seed_key in used_indices:
+                continue
+            members = _choose_parallel_members(
+                seed_row=seed["row"],
+                seed_row_idx=seed["row_index"],
+                seed_bucket_idx=seed["bucket_idx"],
+                buckets=buckets,
+                used_indices=used_indices,
+                config=config,
+            )
+            if len(members) < 2:
+                continue
+            for member in members:
+                used_indices.add((member["bucket_index"], member["row_index"]))
+            merged.append(_merge_parallel_cluster(members, family, polarity, config))
+
+        for seed in seed_candidates:
+            seed_key = (seed["bucket_idx"], seed["row_index"])
+            if seed_key in used_indices:
+                continue
+            used_indices.add(seed_key)
+            merged.append(
+                _merge_parallel_cluster(
+                    [
+                        {
+                            "bucket_name": buckets[seed["bucket_idx"]][0],
+                            "bucket_index": seed["bucket_idx"],
+                            "row_index": seed["row_index"],
+                            "row": seed["row"],
+                            "distance": 0.0,
+                        }
+                    ],
+                    family,
+                    polarity,
+                    config,
+                )
+            )
+
+    merged.sort(
+        key=lambda row: (
+            str(row.get("SampleType") or ""),
+            str(row.get("Polarity") or ""),
+            float(row.get("RT_mean") or 0),
+            _optional_float(row.get("MZ_mean")) or 0.0,
+            -float(row.get("Area_mean") or 0),
+        )
+    )
+    return merged
+
+
 def process_peaks(
     df: pd.DataFrame, config: ScreeningConfig | Dict[str, Any] | None = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[Dict[str, Any]]]:
@@ -557,17 +1003,19 @@ def process_peaks(
     df = df.copy()
     df.columns = [c.strip() for c in df.columns]
 
-    required = ["RT", "Base Peak", "Polarity", "File", "Area"]
+    required = ["RT", "Polarity", "File", "Area"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {', '.join(missing)}")
 
-    for numeric_col in ("RT", "Base Peak", "Area"):
+    if "Base Peak" not in df.columns:
+        df["Base Peak"] = None
+
+    for numeric_col in ("RT", "Area", "Base Peak"):
         df[numeric_col] = pd.to_numeric(df[numeric_col], errors="coerce")
 
-    df = df.dropna(subset=["RT", "Base Peak", "Area"])
+    df = df.dropna(subset=["RT", "Area"])
 
-    # Ensure operator_mark column exists (may be absent when using pd.read_excel fallback)
     if "operator_mark" not in df.columns:
         df["operator_mark"] = None
     if "operator_color" not in df.columns:
@@ -576,8 +1024,8 @@ def process_peaks(
         df["Label"] = None
 
     df["SampleType"] = df.apply(_assign_sample_type, axis=1)
+    df["SummarySampleType"] = df["SampleType"].apply(_parallel_sample_family)
 
-    # Coarse screening — pair replicates
     coarse_rows = []
     for (_, _), grp in df.groupby(["SampleType", "Polarity"]):
         result = coarse_screen(grp, config)
@@ -586,19 +1034,25 @@ def process_peaks(
 
     coarse_df = pd.concat(coarse_rows, ignore_index=True) if coarse_rows else pd.DataFrame()
 
-    # Out-target screening (blank subtraction)
-    blanks = coarse_df[coarse_df["SampleType"] == "blank"] if not coarse_df.empty else pd.DataFrame()
-    samples = coarse_df[coarse_df["SampleType"] != "blank"] if not coarse_df.empty else pd.DataFrame()
+    blanks = coarse_df[coarse_df["SampleType"] == "blank"].copy() if not coarse_df.empty else pd.DataFrame()
+    sample_rows = (
+        coarse_df[coarse_df["SampleType"] != "blank"].to_dict(orient="records") if not coarse_df.empty else []
+    )
 
-    final_results = []
-    for _, peak in samples.iterrows():
+    merged_samples = _parallel_merge_samples(sample_rows, config)
+
+    final_results: List[Dict[str, Any]] = []
+    for peak in merged_samples:
         candidates = _blank_candidates(peak, blanks, config) if not blanks.empty else []
         best_blank = candidates[0] if candidates else None
 
         signal_to_blank_ratio = None
+        blank_area_mean = None
+        area_difference = None
         if best_blank:
-            blank_area = float(best_blank["blank_row"].get("Area_mean") or 0)
-            signal_to_blank_ratio = None if blank_area <= 0 else float(peak["Area_mean"]) / blank_area
+            blank_area_mean = float(best_blank["blank_row"].get("Area_mean") or 0)
+            area_difference = float(peak["Area_mean"]) - blank_area_mean
+            signal_to_blank_ratio = None if blank_area_mean <= 0 else float(peak["Area_mean"]) / blank_area_mean
 
         status = "Real Compound"
         if best_blank and signal_to_blank_ratio is not None and signal_to_blank_ratio < config.signal_to_blank_min:
@@ -606,8 +1060,10 @@ def process_peaks(
         elif best_blank and signal_to_blank_ratio is None:
             status = "Artifact"
 
-        row = peak.to_dict()
+        row = dict(peak)
         row["SignalToBlankRatio"] = _safe_round(signal_to_blank_ratio, 2)
+        row["BlankAreaMean"] = _safe_round(blank_area_mean, 2)
+        row["AreaDifference"] = _safe_round(area_difference, 2)
         row["ConfidenceScore"] = _final_confidence_score(
             replicate_score=float(peak["ReplicateConfidenceScore"]),
             has_blank_match=bool(best_blank),
@@ -615,20 +1071,24 @@ def process_peaks(
             config=config,
         )
         row["Status"] = status
+        row.setdefault("Why", {})
         row["Why"]["BlankMatch"] = bool(best_blank)
         row["Why"]["BlankCandidateCount"] = len(candidates)
         row["Why"]["SignalToBlankRatio"] = _safe_round(signal_to_blank_ratio, 2)
         row["Why"]["SignalToBlankThreshold"] = config.signal_to_blank_min
+        row["Why"]["BlankAreaMean"] = _safe_round(blank_area_mean, 2)
+        row["Why"]["AreaDifference"] = _safe_round(area_difference, 2)
         row["Why"]["ConfidenceScore"] = row["ConfidenceScore"]
         row["Why"]["Decision"] = status
         if best_blank:
             row["Why"]["BlankDetail"] = {
                 "RT": _safe_round(best_blank["blank_row"]["RT_mean"], 4),
-                "MZ": _safe_round(best_blank["blank_row"]["MZ_mean"], 6),
-                "Area_mean": _safe_round(best_blank["blank_row"]["Area_mean"], 2),
+                "MZ": _safe_round(_optional_float(best_blank["blank_row"].get("MZ_mean")), 6),
+                "Area_mean": _safe_round(best_blank["blank_row"].get("Area_mean"), 2),
                 "rt_delta": _safe_round(best_blank["rt_delta"], 4),
                 "mz_delta_da": _safe_round(best_blank["mz_delta_da"], 6),
                 "mz_delta_ppm": _safe_round(best_blank["mz_delta_ppm"], 2),
+                "matching_mode": "RT+MZ" if best_blank["uses_mz"] else "RT",
                 "tolerance": {
                     "rt": config.blank_rt_tol,
                     "mz": config.blank_mz_tol,
@@ -637,18 +1097,18 @@ def process_peaks(
             }
         final_results.append(row)
 
-    # Summary
     summary = []
-    for (stype, pol), grp in df.groupby(["SampleType", "Polarity"]):
-        confirmed_subset = (
-            coarse_df[(coarse_df["SampleType"] == stype) & (coarse_df["Polarity"] == pol)]
-            if not coarse_df.empty
-            else pd.DataFrame()
-        )
+    for (stype, pol), grp in df.groupby(["SummarySampleType", "Polarity"]):
+        if stype == "blank" and not blanks.empty:
+            confirmed_subset = blanks[(blanks["SampleType"] == stype) & (blanks["Polarity"] == pol)]
+            sub: List[Dict[str, Any]] = []
+        else:
+            sub = [r for r in final_results if r["SampleType"] == stype and r["Polarity"] == pol]
+            confirmed_subset = pd.DataFrame(sub) if sub else pd.DataFrame()
+
         confirmed_count = len(confirmed_subset)
 
         if stype != "blank":
-            sub = [r for r in final_results if r["SampleType"] == stype and r["Polarity"] == pol]
             artifacts = len([r for r in sub if r["Status"] == "Artifact"])
             real = len([r for r in sub if r["Status"] == "Real Compound"])
             mean_sb = _safe_round(
@@ -661,9 +1121,7 @@ def process_peaks(
             real = 0
             mean_sb = None
 
-        color_driven = df[
-            (df["SampleType"] == stype) & (df["Polarity"] == pol)
-        ]["operator_mark"].notna().any()
+        color_driven = df[(df["SummarySampleType"] == stype) & (df["Polarity"] == pol)]["operator_mark"].notna().any()
 
         summary.append(
             {
@@ -675,19 +1133,19 @@ def process_peaks(
                 "RealCompounds": real,
                 "ColorDriven": bool(color_driven),
                 "MeanCVPct": _safe_round(confirmed_subset["AreaCVPct"].dropna().mean(), 2)
-                if not confirmed_subset.empty
+                if not confirmed_subset.empty and "AreaCVPct" in confirmed_subset
                 else None,
                 "HighQuality": int((confirmed_subset["ReplicateQuality"] == "High").sum())
-                if not confirmed_subset.empty
+                if not confirmed_subset.empty and "ReplicateQuality" in confirmed_subset
                 else 0,
                 "ModerateQuality": int((confirmed_subset["ReplicateQuality"] == "Moderate").sum())
-                if not confirmed_subset.empty
+                if not confirmed_subset.empty and "ReplicateQuality" in confirmed_subset
                 else 0,
                 "LowQuality": int((confirmed_subset["ReplicateQuality"] == "Low").sum())
-                if not confirmed_subset.empty
+                if not confirmed_subset.empty and "ReplicateQuality" in confirmed_subset
                 else 0,
                 "MeanConfidenceScore": _safe_round(confirmed_subset["ConfidenceScore"].dropna().mean(), 1)
-                if not confirmed_subset.empty
+                if not confirmed_subset.empty and "ConfidenceScore" in confirmed_subset
                 else None,
                 "MeanSignalToBlankRatio": mean_sb,
             }

@@ -1,5 +1,5 @@
 use crate::config::ScreeningConfig;
-use crate::math::{fraction_of_tol, mz_delta, ppm_delta, safe_round};
+use crate::math::{match_metrics, safe_round};
 use crate::types::{BlankCandidate, ConfirmedRow};
 
 /// Find all blank confirmed-rows that match a sample peak within blank tolerances.
@@ -14,26 +14,27 @@ pub fn blank_candidates(
         .enumerate()
         .filter(|(_, b)| b.polarity == peak.polarity)
         .filter_map(|(idx, blank)| {
-            let rt_delta = (blank.rt_mean - peak.rt_mean).abs();
-            let mz_delta_da = (blank.mz_mean - peak.mz_mean).abs();
-            let mz_delta_ppm = ppm_delta(blank.mz_mean, peak.mz_mean);
-            let mz_delta_in_mode =
-                mz_delta(blank.mz_mean, peak.mz_mean, config.blank_mz_mode_str());
-
-            if rt_delta > config.blank_rt_tol || mz_delta_in_mode > config.blank_mz_tol {
+            let mm = match_metrics(
+                blank.rt_mean,
+                blank.mz_mean,
+                peak.rt_mean,
+                peak.mz_mean,
+                config.blank_rt_tol,
+                config.blank_mz_tol,
+                config.blank_mz_mode_str(),
+            );
+            if !mm.matches {
                 return None;
             }
 
-            let distance = fraction_of_tol(rt_delta, config.blank_rt_tol)
-                + fraction_of_tol(mz_delta_in_mode, config.blank_mz_tol);
-
             Some(BlankCandidate {
                 blank_row_idx: idx,
-                rt_delta,
-                mz_delta_da,
-                mz_delta_ppm,
-                mz_delta_in_mode,
-                distance,
+                rt_delta: mm.rt_delta,
+                mz_delta_da: mm.mz_delta_da.unwrap_or(0.0),
+                mz_delta_ppm: mm.mz_delta_ppm.unwrap_or(0.0),
+                mz_delta_in_mode: mm.mz_delta_in_mode.unwrap_or(0.0),
+                distance: mm.distance,
+                uses_mz: mm.uses_mz,
             })
         })
         .collect();
@@ -89,6 +90,8 @@ pub fn apply_blank_result(
     };
 
     peak.signal_to_blank_ratio = signal_to_blank_ratio.map(|v| safe_round(v, 2));
+    peak.blank_area_mean = best.map(|cand| safe_round(blanks[cand.blank_row_idx].area_mean, 2));
+    peak.area_difference = best.map(|cand| safe_round(peak.area_mean - blanks[cand.blank_row_idx].area_mean, 2));
     peak.status = status.to_string();
     peak.confidence_score = final_confidence_score(
         peak.replicate_confidence_score,
@@ -106,6 +109,8 @@ pub fn apply_blank_result(
             json!(signal_to_blank_ratio.map(|v| safe_round(v, 2))),
         );
         why_obj.insert("SignalToBlankThreshold".into(), json!(config.signal_to_blank_min));
+        why_obj.insert("BlankAreaMean".into(), json!(peak.blank_area_mean));
+        why_obj.insert("AreaDifference".into(), json!(peak.area_difference));
         why_obj.insert("ConfidenceScore".into(), json!(peak.confidence_score));
         why_obj.insert("Decision".into(), json!(status));
 
@@ -115,11 +120,12 @@ pub fn apply_blank_result(
                 "BlankDetail".into(),
                 json!({
                     "RT": safe_round(blank.rt_mean, 4),
-                    "MZ": safe_round(blank.mz_mean, 6),
+                    "MZ": blank.mz_mean.map(|v| safe_round(v, 6)),
                     "Area_mean": safe_round(blank.area_mean, 2),
                     "rt_delta": safe_round(cand.rt_delta, 4),
-                    "mz_delta_da": safe_round(cand.mz_delta_da, 6),
-                    "mz_delta_ppm": safe_round(cand.mz_delta_ppm, 2),
+                    "mz_delta_da": if cand.uses_mz { Some(safe_round(cand.mz_delta_da, 6)) } else { None },
+                    "mz_delta_ppm": if cand.uses_mz { Some(safe_round(cand.mz_delta_ppm, 2)) } else { None },
+                    "matching_mode": if cand.uses_mz { "RT+MZ" } else { "RT" },
                     "tolerance": {
                         "rt": config.blank_rt_tol,
                         "mz": config.blank_mz_tol,

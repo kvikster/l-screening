@@ -1,4 +1,5 @@
 use crate::config::ScreeningConfig;
+use crate::types::MatchMetrics;
 
 pub fn safe_round(value: f64, digits: u32) -> f64 {
     let factor = 10f64.powi(digits as i32);
@@ -18,6 +19,53 @@ pub fn mz_delta(mz_a: f64, mz_b: f64, mode: &str) -> f64 {
         ppm_delta(mz_a, mz_b)
     } else {
         (mz_a - mz_b).abs()
+    }
+}
+
+/// Match two peaks by RT and optionally m/z.
+/// Mirrors Python's `_match_metrics` helper — single source of truth for the
+/// tolerance-checking logic used in clustering, parallel merge, and blank matching.
+pub fn match_metrics(
+    rt_a: f64,
+    mz_a: Option<f64>,
+    rt_b: f64,
+    mz_b: Option<f64>,
+    rt_tol: f64,
+    mz_tol: f64,
+    mz_mode: &str,
+) -> MatchMetrics {
+    let rt_delta = (rt_a - rt_b).abs();
+    match (mz_a, mz_b) {
+        (Some(ma), Some(mb)) => {
+            let mz_delta_da = (ma - mb).abs();
+            let mz_delta_ppm = ppm_delta(ma, mb);
+            let mz_delta_in_mode = mz_delta(ma, mb, mz_mode);
+            let matches = rt_delta <= rt_tol && mz_delta_in_mode <= mz_tol;
+            let distance = fraction_of_tol(rt_delta, rt_tol)
+                + fraction_of_tol(mz_delta_in_mode, mz_tol);
+            MatchMetrics {
+                matches,
+                uses_mz: true,
+                rt_delta,
+                mz_delta_da: Some(mz_delta_da),
+                mz_delta_ppm: Some(mz_delta_ppm),
+                mz_delta_in_mode: Some(mz_delta_in_mode),
+                distance,
+            }
+        }
+        _ => {
+            let matches = rt_delta <= rt_tol;
+            let distance = fraction_of_tol(rt_delta, rt_tol);
+            MatchMetrics {
+                matches,
+                uses_mz: false,
+                rt_delta,
+                mz_delta_da: None,
+                mz_delta_ppm: None,
+                mz_delta_in_mode: None,
+                distance,
+            }
+        }
     }
 }
 
@@ -60,15 +108,24 @@ pub fn classify_replicate_quality(cv_percent: Option<f64>, config: &ScreeningCon
 pub fn replicate_confidence_score(
     rt_delta: f64,
     rt_tol: f64,
-    mz_delta_in_mode: f64,
+    mz_delta_in_mode: Option<f64>,
     mz_tol: f64,
     cv_percent: Option<f64>,
     color_paired: bool,
+    use_mz: bool,
     config: &ScreeningConfig,
 ) -> f64 {
     let mut score = 100.0_f64;
     score -= fraction_of_tol(rt_delta, rt_tol) * 20.0;
-    score -= fraction_of_tol(mz_delta_in_mode, mz_tol) * 25.0;
+    if use_mz {
+        // Contract: when use_mz=true the caller guarantees that both peaks had
+        // m/z values, so mz_delta_in_mode must be Some(_).  The unwrap_or
+        // fallback is a defensive guard for correctness in release builds.
+        let delta = mz_delta_in_mode.unwrap_or(0.0);
+        score -= fraction_of_tol(delta, mz_tol) * 25.0;
+    } else {
+        score -= 10.0;
+    }
 
     match cv_percent {
         None => score -= 10.0,

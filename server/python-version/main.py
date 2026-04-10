@@ -31,7 +31,7 @@ app.add_middleware(
 
 def _select_best_sheet(content: bytes) -> str:
     sheets_dict = pd.read_excel(io.BytesIO(content), sheet_name=None)
-    required = ["RT", "Base Peak", "Polarity", "File", "Area"]
+    required = ["RT", "Polarity", "File", "Area"]
     best_sheet_name = max(
         sheets_dict,
         key=lambda n: len(
@@ -206,6 +206,12 @@ def _build_export_payload(
                 "ReplicateCount",
                 "ReplicateQuality",
                 "ReplicateConfidenceScore",
+                "MatchingMode",
+                "ParallelMatch",
+                "ParallelSampleCount",
+                "ParallelSourceSamples",
+                "BlankAreaMean",
+                "AreaDifference",
                 "SignalToBlankRatio",
                 "ConfidenceScore",
                 "SampleType",

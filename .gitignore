@@ -85,3 +85,10 @@ app/src/lib/screening-wasm/target/
 # Project-local artifacts
 # =========================
 *.log
+
+# =========================
+# Test output artifacts
+# =========================
+tests/_python_output.json
+tests/_wasm_input.json
+tests/_wasm_output.json

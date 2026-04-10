@@ -37,11 +37,11 @@ function resolveOperatorMark(argbHex: string | undefined): {
 
 // ─── Excel parsing ────────────────────────────────────────────────────────────
 
-const REQUIRED_COLS = ["RT", "Base Peak", "Polarity", "File", "Area"];
+const REQUIRED_COLS = ["RT", "Polarity", "File", "Area"];
 
 interface ParsedRow {
   RT: number;
-  "Base Peak": number;
+  "Base Peak": number | null;
   Area: number;
   Polarity: string;
   File: string;
@@ -122,16 +122,18 @@ function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
         : undefined;
 
     const rtCell = get("RT");
-    const mzCell = get("Base Peak");
+    const mzIdx = headers.indexOf("Base Peak");
+    const mzCell =
+        mzIdx !== -1 ? ws[XLSX.utils.encode_cell({ r, c: mzIdx })] : undefined;
     const areaCell = get("Area");
     const polCell = get("Polarity");
     const fileCell = get("File");
 
     // Skip rows missing numeric essentials.
     const rt = rtCell?.v != null ? Number(rtCell.v) : NaN;
-    const mz = mzCell?.v != null ? Number(mzCell.v) : NaN;
+    const mz = mzCell?.v != null ? Number(mzCell.v) : null;
     const area = areaCell?.v != null ? Number(areaCell.v) : NaN;
-    if (!isFinite(rt) || !isFinite(mz) || !isFinite(area)) continue;
+    if (!isFinite(rt) || !isFinite(area)) continue;
 
     const polarity = polCell?.v != null ? String(polCell.v).trim() : "";
     const file = fileCell?.v != null ? String(fileCell.v).trim() : "";
@@ -144,7 +146,7 @@ function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
 
     rows.push({
       RT: rt,
-      "Base Peak": mz,
+      "Base Peak": mz != null && isFinite(mz) ? mz : null,
       Area: area,
       Polarity: polarity,
       File: file,
@@ -292,6 +294,12 @@ const PEAK_COLUMNS = [
   "AreaCVPct",
   "ReplicateQuality",
   "ReplicateCount",
+  "MatchingMode",
+  "ParallelMatch",
+  "ParallelSampleCount",
+  "ParallelSourceSamples",
+  "BlankAreaMean",
+  "AreaDifference",
   "ConfidenceScore",
   "SignalToBlankRatio",
   "Rep1_Label",

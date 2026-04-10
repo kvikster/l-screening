@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::config::ScreeningConfig;
 use crate::math::{
-    calc_cv_percent, classify_replicate_quality, fraction_of_tol, mz_delta, ppm_delta,
+    calc_cv_percent, classify_replicate_quality, match_metrics,
     replicate_confidence_score, safe_round,
 };
 use crate::types::{ClusterMember, ConfirmedRow, Row};
@@ -84,10 +84,15 @@ pub fn split_replicate_buckets(
 }
 
 /// Centroid (RT, mz) of a set of rows.
-fn cluster_centroid(members: &[ClusterMember], rows: &[Row]) -> (f64, f64) {
+fn cluster_centroid(members: &[ClusterMember], rows: &[Row]) -> (f64, Option<f64>) {
     let n = members.len() as f64;
     let rt = members.iter().map(|m| rows[m.row_idx].rt).sum::<f64>() / n;
-    let mz = members.iter().map(|m| rows[m.row_idx].base_peak).sum::<f64>() / n;
+    let mz_values: Vec<f64> = members.iter().filter_map(|m| rows[m.row_idx].base_peak).collect();
+    let mz = if mz_values.is_empty() {
+        None
+    } else {
+        Some(mz_values.iter().sum::<f64>() / mz_values.len() as f64)
+    };
     (rt, mz)
 }
 
@@ -95,18 +100,27 @@ fn cluster_centroid(members: &[ClusterMember], rows: &[Row]) -> (f64, f64) {
 /// Returns `(matches, rt_delta, mz_delta_da, mz_delta_ppm, mz_delta_in_mode, distance)`.
 fn match_to_centroid(
     centroid_rt: f64,
-    centroid_mz: f64,
+    centroid_mz: Option<f64>,
     candidate: &Row,
     config: &ScreeningConfig,
 ) -> (bool, f64, f64, f64, f64, f64) {
-    let rt_delta = (candidate.rt - centroid_rt).abs();
-    let mz_delta_da = (candidate.base_peak - centroid_mz).abs();
-    let mz_delta_ppm = ppm_delta(candidate.base_peak, centroid_mz);
-    let mz_delta_in_mode = mz_delta(candidate.base_peak, centroid_mz, config.replicate_mz_mode_str());
-    let matches = rt_delta <= config.replicate_rt_tol && mz_delta_in_mode <= config.replicate_mz_tol;
-    let distance = fraction_of_tol(rt_delta, config.replicate_rt_tol)
-        + fraction_of_tol(mz_delta_in_mode, config.replicate_mz_tol);
-    (matches, rt_delta, mz_delta_da, mz_delta_ppm, mz_delta_in_mode, distance)
+    let mm = match_metrics(
+        centroid_rt,
+        centroid_mz,
+        candidate.rt,
+        candidate.base_peak,
+        config.replicate_rt_tol,
+        config.replicate_mz_tol,
+        config.replicate_mz_mode_str(),
+    );
+    (
+        mm.matches,
+        mm.rt_delta,
+        mm.mz_delta_da.unwrap_or(0.0),
+        mm.mz_delta_ppm.unwrap_or(0.0),
+        mm.mz_delta_in_mode.unwrap_or(0.0),
+        mm.distance,
+    )
 }
 
 /// Greedily pick the best candidate from each other bucket and build the cluster.
@@ -174,10 +188,11 @@ pub fn choose_cluster_members(
 /// Compute pairwise RT and m/z metrics across all member pairs.
 struct PairwiseMetrics {
     max_rt_delta: f64,
-    max_mz_delta_da: f64,
-    max_mz_delta_ppm: f64,
+    max_mz_delta_da: Option<f64>,
+    max_mz_delta_ppm: Option<f64>,
     mean_rt_delta: f64,
-    mean_mz_delta_in_mode: f64,
+    mean_mz_delta_in_mode: Option<f64>,
+    uses_mz: bool,
 }
 
 fn pairwise_cluster_metrics(members: &[ClusterMember], rows: &[Row], config: &ScreeningConfig) -> PairwiseMetrics {
@@ -190,14 +205,19 @@ fn pairwise_cluster_metrics(members: &[ClusterMember], rows: &[Row], config: &Sc
         for j in (i + 1)..members.len() {
             let a = &rows[members[i].row_idx];
             let b = &rows[members[j].row_idx];
-            let rt_d = (a.rt - b.rt).abs();
-            let mz_da = (a.base_peak - b.base_peak).abs();
-            let mz_ppm = ppm_delta(a.base_peak, b.base_peak);
-            let mz_mode = mz_delta(a.base_peak, b.base_peak, config.replicate_mz_mode_str());
-            rt_deltas.push(rt_d);
-            mz_deltas_da.push(mz_da);
-            mz_deltas_ppm.push(mz_ppm);
-            mz_deltas_in_mode.push(mz_mode);
+            let mm = match_metrics(
+                a.rt, a.base_peak,
+                b.rt, b.base_peak,
+                config.replicate_rt_tol,
+                config.replicate_mz_tol,
+                config.replicate_mz_mode_str(),
+            );
+            rt_deltas.push(mm.rt_delta);
+            if mm.uses_mz {
+                mz_deltas_da.push(mm.mz_delta_da.unwrap_or(0.0));
+                mz_deltas_ppm.push(mm.mz_delta_ppm.unwrap_or(0.0));
+                mz_deltas_in_mode.push(mm.mz_delta_in_mode.unwrap_or(0.0));
+            }
         }
     }
 
@@ -205,11 +225,12 @@ fn pairwise_cluster_metrics(members: &[ClusterMember], rows: &[Row], config: &Sc
     let max_or_zero = |v: &[f64]| v.iter().cloned().fold(0.0_f64, f64::max);
 
     PairwiseMetrics {
+        uses_mz: !mz_deltas_in_mode.is_empty(),
         max_rt_delta: max_or_zero(&rt_deltas),
-        max_mz_delta_da: max_or_zero(&mz_deltas_da),
-        max_mz_delta_ppm: max_or_zero(&mz_deltas_ppm),
+        max_mz_delta_da: if mz_deltas_da.is_empty() { None } else { Some(max_or_zero(&mz_deltas_da)) },
+        max_mz_delta_ppm: if mz_deltas_ppm.is_empty() { None } else { Some(max_or_zero(&mz_deltas_ppm)) },
         mean_rt_delta: mean_or_zero(&rt_deltas),
-        mean_mz_delta_in_mode: mean_or_zero(&mz_deltas_in_mode),
+        mean_mz_delta_in_mode: if mz_deltas_in_mode.is_empty() { None } else { Some(mean_or_zero(&mz_deltas_in_mode)) },
     }
 }
 
@@ -223,11 +244,15 @@ pub fn cluster_to_confirmed_row(
     let member_rows: Vec<&Row> = members.iter().map(|m| &rows[m.row_idx]).collect();
     let area_values: Vec<f64> = member_rows.iter().map(|r| r.area).collect();
     let rt_values: Vec<f64> = member_rows.iter().map(|r| r.rt).collect();
-    let mz_values: Vec<f64> = member_rows.iter().map(|r| r.base_peak).collect();
+    let mz_values: Vec<f64> = member_rows.iter().filter_map(|r| r.base_peak).collect();
 
     let area_mean = area_values.iter().sum::<f64>() / area_values.len() as f64;
     let rt_mean = rt_values.iter().sum::<f64>() / rt_values.len() as f64;
-    let mz_mean = mz_values.iter().sum::<f64>() / mz_values.len() as f64;
+    let mz_mean = if mz_values.is_empty() {
+        None
+    } else {
+        Some(mz_values.iter().sum::<f64>() / mz_values.len() as f64)
+    };
 
     let area_cv_pct = calc_cv_percent(&area_values);
     let replicate_quality = classify_replicate_quality(area_cv_pct, config).to_string();
@@ -240,8 +265,10 @@ pub fn cluster_to_confirmed_row(
         config.replicate_mz_tol,
         area_cv_pct,
         colour_split,
+        pm.uses_mz,
         config,
     );
+    let matching_mode = if pm.uses_mz { "RT+MZ" } else { "RT" }.to_string();
 
     let first = member_rows[0];
     let second = member_rows.get(1).copied();
@@ -258,14 +285,14 @@ pub fn cluster_to_confirmed_row(
                 "operator_mark": r.operator_mark,
                 "operator_color": r.operator_color,
                 "rt": safe_round(r.rt, 4),
-                "mz": safe_round(r.base_peak, 6),
+                "mz": r.base_peak.map(|v| safe_round(v, 6)),
                 "area": safe_round(r.area, 2),
             })
         })
         .collect();
 
     let why = json!({
-        "ReplicateStrategy": "greedy_cluster",
+        "ReplicateStrategy": "greedy_cluster_with_singleton_carryover",
         "ReplicateBuckets": members.iter().map(|m| &m.bucket_name).collect::<Vec<_>>(),
         "ReplicateCount": members.len(),
         "ReplicateMembers": replicate_members,
@@ -276,21 +303,23 @@ pub fn cluster_to_confirmed_row(
             "unit": "min",
         },
         "ReplicateMZ": {
-            "mean": safe_round(mz_mean, 6),
-            "max_delta_da": safe_round(pm.max_mz_delta_da, 6),
-            "max_delta_ppm": safe_round(pm.max_mz_delta_ppm, 2),
+            "mean": mz_mean.map(|v| safe_round(v, 6)),
+            "max_delta_da": pm.max_mz_delta_da.map(|v| safe_round(v, 6)),
+            "max_delta_ppm": pm.max_mz_delta_ppm.map(|v| safe_round(v, 2)),
             "tolerance": config.replicate_mz_tol,
             "mode": config.replicate_mz_mode_str(),
+            "used": pm.uses_mz,
         },
         "ReplicateArea": {
             "values": area_values.iter().map(|&v| safe_round(v, 2)).collect::<Vec<_>>(),
             "mean": safe_round(area_mean, 2),
             "cv_pct": area_cv_pct.map(|v| safe_round(v, 2)),
         },
-        "ReplicateQuality": replicate_quality,
+        "ReplicateQuality": replicate_quality.clone(),
         "ReplicateConfidenceScore": rep_score,
         "ColorPaired": colour_split,
-        "Matches": true,
+        "Matches": members.len() > 1,
+        "MatchingMode": matching_mode.clone(),
         "ThresholdProfile": {
             "replicate_rt_tol": config.replicate_rt_tol,
             "replicate_mz_tol": config.replicate_mz_tol,
@@ -305,7 +334,7 @@ pub fn cluster_to_confirmed_row(
     ConfirmedRow {
         group: format!("{}_{}", first.sample_type, first.polarity),
         rt_mean: safe_round(rt_mean, 4),
-        mz_mean: safe_round(mz_mean, 6),
+        mz_mean: mz_mean.map(|v| safe_round(v, 6)),
         area_mean: safe_round(area_mean, 2),
         area_cv_pct: area_cv_pct.map(|v| safe_round(v, 2)),
         replicate_quality,
@@ -325,6 +354,12 @@ pub fn cluster_to_confirmed_row(
         replicate_marks: member_rows.iter().map(|r| r.operator_mark.clone()).collect(),
         replicate_colors: member_rows.iter().map(|r| r.operator_color.clone()).collect(),
         confirmed: "Yes".to_string(),
+        matching_mode,
+        parallel_match: false,
+        parallel_sample_count: 1,
+        parallel_source_samples: vec![first.sample_type.clone()],
+        blank_area_mean: None,
+        area_difference: None,
         signal_to_blank_ratio: None,
         status: String::new(), // filled by blank subtraction
         why,
@@ -338,7 +373,7 @@ pub fn coarse_screen(
     config: &ScreeningConfig,
 ) -> Vec<ConfirmedRow> {
     let (buckets, colour_split) = split_replicate_buckets(group_indices, rows);
-    if buckets.len() < 2 {
+    if buckets.is_empty() {
         return vec![];
     }
 
@@ -359,12 +394,12 @@ pub fn coarse_screen(
     let mut used: HashSet<(usize, usize)> = HashSet::new();
     let mut confirmed = Vec::new();
 
-    for (bucket_idx, row_idx, _) in seeds {
-        if used.contains(&(bucket_idx, row_idx)) {
+    for (bucket_idx, row_idx, _) in &seeds {
+        if used.contains(&(*bucket_idx, *row_idx)) {
             continue;
         }
         let members =
-            choose_cluster_members(row_idx, bucket_idx, &buckets, rows, &used, config);
+            choose_cluster_members(*row_idx, *bucket_idx, &buckets, rows, &used, config);
         if members.len() < 2 {
             continue;
         }
@@ -372,6 +407,20 @@ pub fn coarse_screen(
             used.insert((m.bucket_idx, m.row_idx));
         }
         confirmed.push(cluster_to_confirmed_row(&members, rows, colour_split, config));
+    }
+
+    for (bucket_idx, row_idx, _) in &seeds {
+        if used.contains(&(*bucket_idx, *row_idx)) {
+            continue;
+        }
+        used.insert((*bucket_idx, *row_idx));
+        let singleton = vec![ClusterMember {
+            bucket_name: buckets[*bucket_idx].0.clone(),
+            bucket_idx: *bucket_idx,
+            row_idx: *row_idx,
+            distance: 0.0,
+        }];
+        confirmed.push(cluster_to_confirmed_row(&singleton, rows, colour_split, config));
     }
 
     confirmed

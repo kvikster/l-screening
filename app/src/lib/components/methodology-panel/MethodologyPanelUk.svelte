@@ -1,5 +1,6 @@
 <script lang="ts">
     import TermTooltip from "../TermTooltip.svelte";
+    import MethodologyVisualizerUk from "../methodology-page/MethodologyVisualizerUk.svelte";
 
     const gl: Record<string, string> = {
         RT: "Retention Time — час утримання аналіту в хроматографічній колонці (хвилини). Кожна сполука має характерний RT, що використовується для ідентифікації.",
@@ -47,6 +48,8 @@
 </script>
 
 <div class="space-y-10 text-sm">
+    <MethodologyVisualizerUk />
+
     <section id="m-input">
         <h3 class="mb-3 border-b border-slate-200 pb-2 text-base font-bold text-slate-900 dark:border-slate-700 dark:text-slate-50">
             1. Вхідні дані

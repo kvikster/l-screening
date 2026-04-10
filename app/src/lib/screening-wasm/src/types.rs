@@ -6,8 +6,8 @@ use serde_json::Value;
 pub struct Row {
     #[serde(rename = "RT")]
     pub rt: f64,
-    #[serde(rename = "Base Peak")]
-    pub base_peak: f64,
+    #[serde(rename = "Base Peak", default)]
+    pub base_peak: Option<f64>,
     #[serde(rename = "Area")]
     pub area: f64,
     #[serde(rename = "Polarity")]
@@ -33,7 +33,7 @@ pub struct ConfirmedRow {
     #[serde(rename = "RT_mean")]
     pub rt_mean: f64,
     #[serde(rename = "MZ_mean")]
-    pub mz_mean: f64,
+    pub mz_mean: Option<f64>,
     #[serde(rename = "Area_mean")]
     pub area_mean: f64,
     #[serde(rename = "AreaCVPct")]
@@ -73,6 +73,18 @@ pub struct ConfirmedRow {
     pub replicate_colors: Vec<Option<String>>,
     #[serde(rename = "Confirmed")]
     pub confirmed: String,
+    #[serde(rename = "MatchingMode")]
+    pub matching_mode: String,
+    #[serde(rename = "ParallelMatch")]
+    pub parallel_match: bool,
+    #[serde(rename = "ParallelSampleCount")]
+    pub parallel_sample_count: usize,
+    #[serde(rename = "ParallelSourceSamples")]
+    pub parallel_source_samples: Vec<String>,
+    #[serde(rename = "BlankAreaMean")]
+    pub blank_area_mean: Option<f64>,
+    #[serde(rename = "AreaDifference")]
+    pub area_difference: Option<f64>,
     /// Filled by blank subtraction step.
     #[serde(rename = "SignalToBlankRatio")]
     pub signal_to_blank_ratio: Option<f64>,
@@ -132,5 +144,19 @@ pub struct BlankCandidate {
     pub mz_delta_ppm: f64,
     #[allow(dead_code)]
     pub mz_delta_in_mode: f64,
+    pub distance: f64,
+    pub uses_mz: bool,
+}
+
+/// Result of matching two peaks by RT and optionally m/z.
+/// Mirrors Python's `_match_metrics` helper.
+#[derive(Debug, Clone)]
+pub struct MatchMetrics {
+    pub matches: bool,
+    pub uses_mz: bool,
+    pub rt_delta: f64,
+    pub mz_delta_da: Option<f64>,
+    pub mz_delta_ppm: Option<f64>,
+    pub mz_delta_in_mode: Option<f64>,
     pub distance: f64,
 }
