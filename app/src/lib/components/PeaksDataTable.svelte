@@ -292,11 +292,10 @@
       lengthMenu: [10, 25, 50, 100],
       stateSave: false,
       order: orderBy,
-      orderFixed: grouping === "none" ? undefined : [[0, "asc"]],
       layout: {
         topStart: null,
         topEnd: null,
-        bottomStart: "pageLength",
+        bottomStart: ["pageLength", "info"],
         bottomEnd: "paging",
       },
       createdRow: (row: HTMLTableRowElement, rowData: any) => {
@@ -405,141 +404,172 @@
   });
 </script>
 
-{#if showFilters}
-<div class="mb-4 space-y-0 rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
+<div class="flex h-full min-h-0 flex-col">
+  <div class="group relative z-30 mb-0 shrink-0 rounded-xl border border-slate-200 bg-white transition-all hover:rounded-b-none hover:shadow-lg dark:border-slate-700 dark:bg-slate-800/80">
+    
+    <!-- ROW 1 (Always Visible): Title, Search, Primary Filters -->
+    <div class="flex flex-wrap items-center justify-between gap-4 px-4 py-2.5">
+      
+      <!-- Informational Text -->
+      <div>
+        <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">{get(dictionary).screenedPeaks}</h3>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400">{get(dictionary).screenedPeaksDesc}</p>
+      </div>
 
-  <!-- Row 1: Search + Grouping + Reset -->
-  <div class="flex items-center gap-2 px-3 py-2.5">
-    <div class="relative flex-1">
-      <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input
-        type="search"
-        bind:value={searchQuery}
-        placeholder="Пошук RT, m/z, статус…"
-        class="dt-search-input"
-      />
-    </div>
-    <div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5 text-xs dark:border-slate-600 dark:bg-slate-700">
-      {#each [["none", "—"], ["sample", "Зразок"], ["status", "Статус"]] as [val, label]}
-        <button
-          type="button"
-          onclick={() => (grouping = val as typeof grouping)}
-          class="rounded-md px-2 py-1 font-medium transition-colors {grouping === val ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}"
-        >{label}</button>
-      {/each}
-    </div>
-    {#if activeFilterCount > 0}
-      <button
-        type="button"
-        onclick={resetDefaults}
-        class="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:border-rose-300 hover:text-rose-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-400 dark:hover:text-rose-400"
-        title="Скинути фільтри"
-      >
-        <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        <span class="rounded-full bg-rose-100 px-1.5 py-0.5 font-semibold text-rose-600 dark:bg-rose-950 dark:text-rose-400">{activeFilterCount}</span>
-      </button>
-    {/if}
-  </div>
-
-  <div class="border-t border-slate-200 dark:border-slate-700"></div>
-
-  <!-- Row 2: two columns — chips left, sliders right -->
-  <div class="grid grid-cols-1 divide-y divide-slate-200 dark:divide-slate-700 sm:grid-cols-[1fr_auto] sm:divide-x sm:divide-y-0">
-
-    <!-- Left: categorical chips -->
-    <div class="space-y-2 px-3 py-2.5">
-      <!-- Status -->
-      <div class="flex items-center gap-2">
-        <span class="dt-chip-label w-20 shrink-0">Статус</span>
-        <div class="flex flex-wrap gap-1">
-          {#each [["all", "Всі"], ["Real Compound", getStatusLabel("Real Compound")], ["Artifact", getStatusLabel("Artifact")]] as [val, label]}
-            <button type="button" onclick={() => (statusFilter = val)}
-              class="dt-chip {statusFilter === val ? (val === 'Real Compound' ? 'dt-chip-active-green' : val === 'Artifact' ? 'dt-chip-active-red' : 'dt-chip-active') : ''}"
-            >{label}</button>
+      <!-- Persistent Controls -->
+      <div class="flex items-center gap-3">
+        <!-- Search -->
+        <div class="relative w-48 transition-all group-hover:w-56">
+          <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="search" bind:value={searchQuery} placeholder="Пошук RT, m/z…" class="w-full rounded-md border border-slate-200 bg-slate-50/50 py-1.5 pl-8 pr-2 text-xs outline-none transition-colors focus:border-blue-400 dark:border-slate-600 dark:bg-slate-900/50 dark:text-white" />
+        </div>
+        
+        <!-- Primary Status Filter (Artifact vs Compound) -->
+        <div class="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-900/50">
+          {#each [["all", "Всі"], ["Real Compound", "Компаунд"], ["Artifact", "Артефакт"]] as [val, label]}
+            <button type="button" onclick={() => (statusFilter = val)} class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors {statusFilter === val ? 'rounded bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}">{label}</button>
           {/each}
         </div>
-      </div>
-      <!-- Quality -->
-      <div class="flex items-center gap-2">
-        <span class="dt-chip-label w-20 shrink-0">{get(dictionary).replicateQuality}</span>
-        <div class="flex flex-wrap gap-1">
-          {#each [["all", "Всі"], ["high_moderate", "High + Mod"], ["High", getReplicateQualityLabel("High")], ["Moderate", getReplicateQualityLabel("Moderate")], ["Low", getReplicateQualityLabel("Low")]] as [val, label]}
-            <button type="button" onclick={() => (qualityFilter = val)}
-              class="dt-chip {qualityFilter === val ? 'dt-chip-active' : ''}"
-            >{label}</button>
-          {/each}
+
+        <!-- Grouping -->
+        <div class="flex flex-col">
+          <select bind:value={grouping} class="cursor-pointer rounded-md border border-slate-200 bg-transparent py-1 pl-2 pr-6 text-xs font-medium text-slate-700 outline-none hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700">
+            <option value="none">Без групування</option>
+            <option value="sample">По зразку</option>
+            <option value="status">По статусу</option>
+          </select>
         </div>
+
+        <!-- Reset Indicator if hidden filters are active -->
+        <button type="button" onclick={resetDefaults} class="flex h-7 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 transition-opacity {activeFilterCount > (statusFilter!=='all'?1:0) ? 'opacity-100 hover:border-rose-300 hover:bg-rose-50' : 'pointer-events-none opacity-0'} dark:border-slate-600 dark:bg-slate-800" title="Скинути приховані фільтри">
+          <svg class="h-3 w-3 text-rose-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          <span class="text-[10px] font-bold text-rose-600 dark:text-rose-400">{activeFilterCount}</span>
+        </button>
+
       </div>
-      <!-- Polarity + Sample -->
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div class="flex items-center gap-2">
-          <span class="dt-chip-label w-20 shrink-0">{get(dictionary).polarity}</span>
-          <div class="flex gap-1">
-            {#each [["all", "Всі"], ["positive", "+"], ["negative", "−"]] as [val, label]}
-              <button type="button" onclick={() => (polarityFilter = val)}
-                class="dt-chip {polarityFilter === val ? 'dt-chip-active' : ''}"
-              >{label}</button>
-            {/each}
-          </div>
-        </div>
-        {#if sampleOptions.length > 1}
+    </div>
+
+    <!-- ROW 2 (Hover Expansion): Advanced Filters -->
+    <div class="absolute left-[-1px] right-[-1px] top-full hidden rounded-b-xl border-x border-b border-slate-200 bg-white pb-3 shadow-2xl group-hover:block dark:border-slate-700 dark:bg-slate-800/95">
+      <div class="mx-4 mb-2 border-t border-slate-100 dark:border-slate-700/50"></div>
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4">
+        
+        <!-- Categorical Chips -->
+        <div class="flex flex-1 flex-wrap items-center gap-x-6 gap-y-2">
           <div class="flex items-center gap-2">
-            <span class="dt-chip-label shrink-0">{get(dictionary).sample}</span>
-            <div class="flex flex-wrap gap-1">
-              <button type="button" onclick={() => (sampleFilter = "all")}
-                class="dt-chip {sampleFilter === 'all' ? 'dt-chip-active' : ''}">Всі</button>
-              {#each sampleOptions as option}
-                <button type="button" onclick={() => (sampleFilter = option)}
-                  class="dt-chip {sampleFilter === option ? 'dt-chip-active' : ''}"
-                >{getSampleTypeLabel(option)}</button>
+            <span class="dt-chip-label text-xs">Клас</span>
+            <div class="flex gap-1">
+              {#each [["all", "Всі"], ["high_moderate", "H+M"], ["High", "H"], ["Moderate", "M"], ["Low", "L"]] as [val, label]}
+                <button type="button" onclick={() => (qualityFilter = val)} class="dt-chip text-[10px] !py-0.5 {qualityFilter === val ? 'dt-chip-active' : ''}">{label}</button>
               {/each}
             </div>
           </div>
-        {/if}
+          <div class="flex items-center gap-2">
+            <span class="dt-chip-label text-xs">Ion</span>
+            <div class="flex gap-1">
+              {#each [["all", "Всі"], ["positive", "+"], ["negative", "−"]] as [val, label]}
+                <button type="button" onclick={() => (polarityFilter = val)} class="dt-chip text-[10px] !py-0.5 {polarityFilter === val ? 'dt-chip-active' : ''}">{label}</button>
+              {/each}
+            </div>
+          </div>
+          {#if sampleOptions.length > 1}
+            <div class="flex items-center gap-2">
+              <span class="dt-chip-label text-xs">Зразок</span>
+              <select bind:value={sampleFilter} class="max-w-[8rem] truncate rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] outline-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                <option value="all">Всі зразки</option>
+                {#each sampleOptions as option}<option value={option}>{getSampleTypeLabel(option)}</option>{/each}
+              </select>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Numeric Sliders -->
+        <div class="flex shrink-0 items-center gap-5 border-l border-slate-100 pl-4 dark:border-slate-700">
+          <label class="flex items-center gap-1.5">
+            <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Conf.≥</span>
+            <input type="range" min="0" max="100" step="1" bind:value={confidenceMin} class="dt-slider !w-20" />
+            <span class="w-6 text-[10px] font-bold text-slate-700 {confidenceMin > 0 ? 'text-blue-600 dark:text-blue-400' : 'dark:text-slate-300'}">{confidenceMin}</span>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400">CV%≤</span>
+            <input type="range" min="0" max="100" step="1" bind:value={cvMax} class="dt-slider !w-20" />
+            <span class="w-6 text-[10px] font-bold text-slate-700 {cvMax < 100 ? 'text-blue-600 dark:text-blue-400' : 'dark:text-slate-300'}">{cvMax}</span>
+          </label>
+          <label class="flex items-center gap-1.5">
+            <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400">S/B≥</span>
+            <input type="range" min="0" max="20" step="0.1" bind:value={sbMin} class="dt-slider !w-20" />
+            <span class="w-6 text-[10px] font-bold text-slate-700 {sbMin > 0 ? 'text-blue-600 dark:text-blue-400' : 'dark:text-slate-300'}">{sbMin.toFixed(1)}</span>
+          </label>
+        </div>
+
       </div>
     </div>
-
-    <!-- Right: numeric sliders -->
-    <div class="flex flex-col justify-center gap-2 px-4 py-2.5">
-      <div class="dt-slider-row">
-        <span class="dt-slider-label">{get(dictionary).confidence} ≥</span>
-        <input type="range" min="0" max="100" step="1" bind:value={confidenceMin} class="dt-slider" />
-        <span class="dt-slider-val {confidenceMin > 0 ? 'dt-slider-val-active' : ''}">{confidenceMin}</span>
-      </div>
-      <div class="dt-slider-row">
-        <span class="dt-slider-label">CV% ≤</span>
-        <input type="range" min="0" max="100" step="1" bind:value={cvMax} class="dt-slider" />
-        <span class="dt-slider-val {cvMax < 100 ? 'dt-slider-val-active' : ''}">{cvMax}</span>
-      </div>
-      <div class="dt-slider-row">
-        <span class="dt-slider-label">S/B ≥</span>
-        <input type="range" min="0" max="20" step="0.1" bind:value={sbMin} class="dt-slider" />
-        <span class="dt-slider-val {sbMin > 0 ? 'dt-slider-val-active' : ''}">{sbMin.toFixed(1)}</span>
-      </div>
-    </div>
-
   </div>
 
-</div>
-{/if}
-
-<div class="peaks-dt overflow-x-auto">
-  <table bind:this={tableEl} class="min-w-full text-sm"></table>
+  <div class="peaks-dt flex flex-1 flex-col overflow-hidden">
+    <table bind:this={tableEl} class="min-w-full text-sm align-middle"></table>
+  </div>
 </div>
 
 <style>
+  /* ── Flexbox DataTable Layout ─────────────────────────────── */
+  :global(.peaks-dt .dt-container) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0; /* Important for flex child */
+  }
+  :global(.peaks-dt .dt-container .dt-layout-row) {
+    margin: 0 !important;
+  }
+  :global(.peaks-dt) {
+    min-height: 0;
+  }
+  :global(.peaks-dt .dt-layout-table) {
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    margin: 0;
+    padding: 0;
+  }
+  :global(.peaks-dt .dt-layout-table > .dt-layout-cell) {
+    display: block;
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+    padding: 0;
+  }
+
   /* ── Layout wrappers generated by DataTables ──────────────────── */
-  :global(.peaks-dt .dt-layout-row) {
+  /* Target only pagination/info rows, avoiding adding padding to the main table row itself */
+  :global(.peaks-dt .dt-layout-row:not(.dt-layout-table)) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.45rem 1rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    padding: 0.35rem 0.25rem 0.2rem 0.25rem;
+    gap: 1rem;
+    flex-shrink: 0; /* Prevents pagination from squishing */
+  }
+  :global(.peaks-dt .dt-layout-row.dt-layout-end),
+  :global(.peaks-dt .dt-layout-row:last-child) {
+    margin: 0;
+    padding: 0 0.35rem 0.15rem 0.35rem;
+    border-top: 1px solid #e2e8f0;
+    background: rgba(248, 250, 252, 0.96);
+  }
+  :global(.dark .peaks-dt .dt-layout-row.dt-layout-end),
+  :global(.dark .peaks-dt .dt-layout-row:last-child) {
+    border-top-color: #334155;
+    background: rgba(15, 23, 42, 0.92);
   }
   :global(.peaks-dt .dt-layout-cell) {
     display: flex;
     align-items: center;
+    gap: 0.75rem;
   }
 
   /* ── Filter: search ───────────────────────────────────────── */
@@ -648,33 +678,32 @@
   /* Page length select */
   :global(.peaks-dt .dt-length select) {
     border: 1px solid #e2e8f0;
-    border-radius: 0.75rem;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
-    color: #0f172a;
+    border-radius: 0.375rem;
+    padding: 0.1rem 1.25rem 0.1rem 0.4rem;
+    font-size: 0.7rem;
+    color: #475569;
     background: #fff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    font-weight: 600;
   }
   :global(.dark .peaks-dt .dt-length select) {
-    background: #334155;
-    border-color: #475569;
-    color: #f1f5f9;
+    background: #1e293b;
+    border-color: #334155;
+    color: #cbd5e1;
   }
   :global(.peaks-dt .dt-length label) {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    color: #64748b;
-  }
-  :global(.dark .peaks-dt .dt-length label) {
-    color: #94a3b8;
+    gap: 0.4rem;
+    font-size: 0;
+    color: transparent;
   }
 
   /* Info text */
   :global(.peaks-dt .dt-info) {
-    font-size: 0.875rem;
+    font-size: 0.7rem;
+    font-weight: 500;
     color: #64748b;
+    white-space: nowrap;
   }
   :global(.dark .peaks-dt .dt-info) {
     color: #94a3b8;
@@ -683,41 +712,46 @@
   /* Pagination */
   :global(.peaks-dt .dt-paging) {
     display: flex;
-    gap: 0.25rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.15rem;
   }
-  :global(.peaks-dt .dt-paging button) {
-    border: 1px solid #e2e8f0;
-    border-radius: 0.5rem;
-    padding: 0.25rem 0.625rem;
-    font-size: 0.875rem;
-    background: #fff;
-    color: #374151;
+  :global(.peaks-dt .dt-paging .dt-paging-button) {
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: transparent;
+    color: #64748b;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: all 0.1s;
+    min-width: 1.5rem;
+    text-align: center;
   }
-  :global(.peaks-dt .dt-paging button:hover:not(:disabled)) {
+  :global(.peaks-dt .dt-paging .dt-paging-button:hover:not(.disabled)) {
     background: #f1f5f9;
+    color: #0f172a;
   }
-  :global(.peaks-dt .dt-paging button.current) {
+  :global(.peaks-dt .dt-paging .dt-paging-button.current) {
     background: #2563eb;
     color: #fff;
     border-color: #2563eb;
   }
-  :global(.peaks-dt .dt-paging button:disabled) {
-    opacity: 0.4;
+  :global(.peaks-dt .dt-paging .dt-paging-button.disabled) {
+    opacity: 0.3;
     cursor: default;
   }
-  :global(.dark .peaks-dt .dt-paging button) {
-    background: #1e293b;
-    border-color: #475569;
-    color: #cbd5e1;
+  :global(.dark .peaks-dt .dt-paging .dt-paging-button) {
+    color: #94a3b8;
   }
-  :global(.dark .peaks-dt .dt-paging button:hover:not(:disabled)) {
+  :global(.dark .peaks-dt .dt-paging .dt-paging-button:hover:not(.disabled)) {
     background: #334155;
+    color: #f1f5f9;
   }
-  :global(.dark .peaks-dt .dt-paging button.current) {
-    background: #2563eb;
-    border-color: #2563eb;
+  :global(.dark .peaks-dt .dt-paging .dt-paging-button.current) {
+    background: #3b82f6;
+    border-color: #3b82f6;
     color: #fff;
   }
 
@@ -737,19 +771,26 @@
     white-space: nowrap;
     cursor: pointer;
     user-select: none;
+    vertical-align: middle;
+    position: sticky;
+    top: 0;
+    z-index: 5;
   }
   :global(.dark .peaks-dt table.dataTable thead th) {
     background: #334155;
     color: #94a3b8;
     border-bottom-color: #475569;
   }
-  :global(.peaks-dt table.dataTable thead th.dt-ordering-asc::after) {
-    content: " ↑";
+  :global(.peaks-dt table.dataTable thead th.dt-ordering-asc .dt-column-order:before) {
     color: #3b82f6;
+    opacity: 1;
   }
-  :global(.peaks-dt table.dataTable thead th.dt-ordering-desc::after) {
-    content: " ↓";
+  :global(.peaks-dt table.dataTable thead th.dt-ordering-desc .dt-column-order:after) {
     color: #3b82f6;
+    opacity: 1;
+  }
+  :global(.peaks-dt .dt-scroll-body table.dataTable thead th) {
+    background: transparent;
   }
   :global(.peaks-dt table.dataTable tbody tr) {
     border-bottom: 1px solid #f1f5f9;

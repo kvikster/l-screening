@@ -367,127 +367,79 @@
 
 <svelte:window onkeydown={handleWindowKeydown} onclick={handleWindowClick} />
 
-<div class="mx-auto max-w-7xl space-y-4 px-4 pb-4">
-  <div class="flex flex-wrap items-center gap-2">
-    <div class="mr-auto min-w-[16rem]">
-      <div class="inline-flex items-center gap-2">
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 transition-colors hover:text-blue-500 dark:text-slate-500 dark:hover:text-blue-400"
-          onclick={onUploadNewFile}
-          title={dict.uploadNewFile}
+<div class="mx-auto max-w-[1400px] flex-col space-y-4 px-4 pb-0">
+  <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
+    
+    <div class="flex items-center gap-3">
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-blue-500 dark:text-slate-500 dark:hover:text-blue-400"
+        onclick={onUploadNewFile}
+        title={dict.uploadNewFile}
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        <span class="hidden sm:inline">{dict.appName}</span>
+      </button>
+
+      <span class="h-5 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true"></span>
+
+      <h2 class="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 md:text-lg">{title}</h2>
+
+      <span
+        class={["hidden rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-700 sm:inline-block", onlineStatus ? "bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-400" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"].join(" ")}
+      >
+        {onlineStatus ? dict.online : dict.offline}
+      </span>
+
+      <details class="relative">
+        <summary
+          class="inline-flex h-6 w-6 cursor-pointer list-none items-center justify-center rounded-full bg-blue-50 text-blue-600 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-900/50 dark:text-blue-400 dark:hover:bg-blue-900"
+          aria-label={`${dict.exportXlsx} / ${dict.exportHtml}`}
+          title={`${dict.exportXlsx} / ${dict.exportHtml}`}
         >
-          <span>{dict.appName}</span>
-          <span
-            class={[
-              "rounded-full px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal",
-              onlineStatus
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
-            ].join(" ")}
-          >
-            {onlineStatus ? dict.online : dict.offline}
-          </span>
-        </button>
-        <span class="h-4 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true"></span>
-        <label class="flex cursor-pointer items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-          <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-          </svg>
-          <select
-            class="bg-transparent outline-none text-[11px]"
-            value={currentLocale}
-            onchange={(e) => setLocale((e.currentTarget as HTMLSelectElement).value)}
-            aria-label={dict.languageLabel}
-          >
-            {#each Object.entries(localeLabels) as [value, label]}
-              <option {value}>{label}</option>
-            {/each}
-          </select>
-        </label>
-        <button
-          type="button"
-          onclick={cycleTheme}
-          title={themeLabels[currentTheme]}
-          aria-label={themeLabels[currentTheme]}
-          class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-        >
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d={themeIcons[currentTheme]}/>
-          </svg>
-        </button>
-      </div>
-      <div class="mt-0.5 flex items-center gap-2">
-        <h2 class="text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-50">{title}</h2>
-        <details class="relative">
-          <summary
-            class="inline-flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label={`${dict.exportXlsx} / ${dict.exportHtml}`}
-            title={`${dict.exportXlsx} / ${dict.exportHtml}`}
-          >
-            {#if exporting || exportingHtml}
-              <Loader2 class="h-4 w-4 animate-spin" />
-            {:else}
-              <Download class="h-4 w-4" />
-            {/if}
-          </summary>
-          <div
-            class="absolute left-0 z-20 mt-2 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
-          >
-            <button
-              class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-100 dark:hover:bg-slate-700"
-              onclick={onExportXlsx}
-              disabled={exporting || exportingHtml}
-              type="button"
-            >
-              XLS
-            </button>
-            <button
-              class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-100 dark:hover:bg-slate-700"
-              onclick={onExportHtml}
-              disabled={exporting || exportingHtml}
-              type="button"
-            >
-              HTML
-            </button>
-          </div>
-        </details>
-      </div>
+          {#if exporting || exportingHtml}
+            <Loader2 class="h-3.5 w-3.5 animate-spin" />
+          {:else}
+            <Download class="h-3.5 w-3.5" />
+          {/if}
+        </summary>
+        <div class="absolute left-0 z-20 mt-2 w-32 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800">
+          <button class="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-100 dark:hover:bg-slate-700" onclick={onExportXlsx} disabled={exporting || exportingHtml}>XLSX Export</button>
+          <button class="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-100 dark:hover:bg-slate-700" onclick={onExportHtml} disabled={exporting || exportingHtml}>HTML Export</button>
+        </div>
+      </details>
     </div>
-    <button
-      type="button"
-      aria-haspopup="dialog"
-      aria-expanded={methodParamsOpen}
-      class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 shadow-sm transition-colors hover:border-blue-300 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500"
-      onclick={(event) => {
-        event.stopPropagation();
-        toggleMethodParams();
-      }}
-    >
-      <span class="font-semibold text-slate-900 dark:text-slate-100">{dict.thresholdProfile}</span>
-      replicate {formatNumber(parameters.replicate_rt_tol, 2)} / {formatNumber(parameters.replicate_mz_tol, 2)} {formatMode(parameters.replicate_mz_mode)},
-      blank {formatNumber(parameters.blank_rt_tol, 2)} / {formatNumber(parameters.blank_mz_tol, 2)} {formatMode(parameters.blank_mz_mode)},
-      S/B ≥ {formatNumber(parameters.signal_to_blank_min, 1)}
-      {#if metadata?.cacheHit}
-        <span class="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">{dict.cacheHit}</span>
-      {/if}
-    </button>
-    <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+
+    <div class="flex items-center gap-3">
       <button
         type="button"
-        class={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === "summary" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
-        onclick={() => setActiveTab("summary")}
-      >Сумарно</button>
-      <button
-        type="button"
-        class={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === "data" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
-        onclick={() => setActiveTab("data")}
-      >Дані</button>
-      <button
-        type="button"
-        class={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeTab === "3d" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"}`}
-        onclick={() => setActiveTab("3d")}
-      >3D</button>
+        aria-haspopup="dialog"
+        aria-expanded={methodParamsOpen}
+        class="hidden items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-left text-[10px] text-slate-600 transition-colors hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:border-blue-500 xl:flex"
+        onclick={(e) => { e.stopPropagation(); toggleMethodParams(); }}
+      >
+        <span class="font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">Param:</span>
+        <span class="opacity-80">R{formatNumber(parameters.replicate_rt_tol, 2)}/{formatNumber(parameters.replicate_mz_tol, 2)}{formatMode(parameters.replicate_mz_mode)}, B{formatNumber(parameters.blank_rt_tol, 2)}/{formatNumber(parameters.blank_mz_tol, 2)}{formatMode(parameters.blank_mz_mode)}, S/B≥{formatNumber(parameters.signal_to_blank_min, 1)}</span>
+        {#if metadata?.cacheHit}
+          <span class="ml-1 rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">{dict.cacheHit}</span>
+        {/if}
+      </button>
+
+      <div class="hidden items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 sm:flex">
+        <svg class="h-3.5 w-3.5 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <select class="bg-transparent font-medium outline-none" value={currentLocale} onchange={(e) => setLocale((e.currentTarget as HTMLSelectElement).value)}>
+          {#each Object.entries(localeLabels) as [val, label]}<option value={val}>{label}</option>{/each}
+        </select>
+        <button type="button" onclick={cycleTheme} class="ml-1 flex h-6 w-6 items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors">
+          <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d={themeIcons[currentTheme]}/></svg>
+        </button>
+      </div>
+
+      <div class="inline-flex rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+        <button type="button" class={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${activeTab === "summary" ? "bg-white text-blue-600 shadow-sm dark:bg-slate-700 dark:text-blue-400" : "text-slate-500 hover:text-slate-700 dark:text-slate-400"}`} onclick={() => setActiveTab("summary")}>Summary</button>
+        <button type="button" class={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${activeTab === "data" ? "bg-white text-blue-600 shadow-sm dark:bg-slate-700 dark:text-blue-400" : "text-slate-500 hover:text-slate-700 dark:text-slate-400"}`} onclick={() => setActiveTab("data")}>Data</button>
+        <button type="button" class={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${activeTab === "3d" ? "bg-white text-blue-600 shadow-sm dark:bg-slate-700 dark:text-blue-400" : "text-slate-500 hover:text-slate-700 dark:text-slate-400"}`} onclick={() => setActiveTab("3d")}>3D</button>
+      </div>
     </div>
   </div>
 
@@ -695,18 +647,18 @@
         {/if}
       </div>
       {#if summaryMetricsOpen}
-        <div class="overflow-x-auto">
+        <div class="overflow-auto max-h-[calc(100vh-320px)]">
           <table class="min-w-full text-xs sm:text-sm">
           <thead class="bg-slate-50 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
             <tr>
-              <th class="px-3 py-2 text-left font-semibold" title="Тип зразка">{dict.sample}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="Режим іонізації">{dict.polarity}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="Підтверджені реплікатами піки">{dict.confirmed}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="Класифікація підтверджених піків">{dict.realArtifact}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="Стабільність між реплікатами">{dict.meanCv}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="High / Moderate / Low">{dict.qualityBands}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="Середній confidence score">{dict.meanConfidence}</th>
-              <th class="px-3 py-2 text-left font-semibold" title="Signal-to-blank ratio">{dict.meanSb}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Тип зразка">{dict.sample}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Режим іонізації">{dict.polarity}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Підтверджені реплікатами піки">{dict.confirmed}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Класифікація підтверджених піків">{dict.realArtifact}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Стабільність між реплікатами">{dict.meanCv}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="High / Moderate / Low">{dict.qualityBands}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Середній confidence score">{dict.meanConfidence}</th>
+              <th class="sticky top-0 z-10 bg-inherit px-3 py-2 text-left font-semibold shadow-[0_1px_0_0_#e2e8f0] dark:shadow-[0_1px_0_0_#334155]" title="Signal-to-blank ratio">{dict.meanSb}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
@@ -730,23 +682,9 @@
   </div>
 
   {:else if activeTab === "data"}
-    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
-      <button
-        type="button"
-        class="flex w-full items-center justify-between border-b border-slate-100 px-4 py-2 text-left transition-colors hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800/70"
-        onclick={toggleDataFilters}
-        aria-expanded={dataFiltersOpen}
-      >
-        <div>
-          <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100">{dict.screenedPeaks}</h3>
-          <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{dict.screenedPeaksDesc}</p>
-        </div>
-        <span class="rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-500 dark:text-slate-300">
-          {dataFiltersOpen ? "Сховати фільтр" : "Показати фільтр"}
-        </span>
-      </button>
-      <div class="p-4">
-        <PeaksDataTable peaks={peaks} onAuditClick={openAuditTrail} showFilters={dataFiltersOpen} />
+    <section class="flex flex-col rounded-t-2xl border-x border-t border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800" style="height: calc(100vh - 120px);">
+      <div class="flex flex-1 flex-col overflow-hidden p-4 pb-0 pt-0">
+        <PeaksDataTable peaks={peaks} onAuditClick={openAuditTrail} />
       </div>
     </section>
   {/if}

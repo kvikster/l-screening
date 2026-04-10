@@ -2,644 +2,332 @@
   @file MethodologyVisualizerUk.svelte
   @description
   Україномовна інтерактивна візуалізація конвеєра LC-MS скринінгу.
-  Містить три розділи:
-    1. Блок-схема — горизонтальні картки кроків, з'єднані стрілками
-    2. Інтерактивний обхід — покроковий навігатор з деталями вхід/дія/вихід
-    3. Картки логіки рішень — правила «умова → результат» для Artifact / Real Compound
-
-  Використовує Svelte 5 runes ($state, $derived) та нативні класи Tailwind dark-mode.
-  Без зовнішніх залежностей (Mermaid, D3 тощо) — чистий HTML/SVG/CSS.
+  Об'єднує блок-схему та детальний алгоритм у єдиний інтерактивний "Full-width" компонент. 
 -->
 <script lang="ts">
+    import GlossaryTooltip from "./GlossaryTooltip.svelte";
+    import { fade } from 'svelte/transition';
+    import { cubicOut } from 'svelte/easing';
+
+    // Отримуємо словник термінів для підказок
+    let { defs = {} }: { defs: Record<string, string> } = $props();
+
     // ---------------------------------------------------------------------------
-    // Кроки блок-схеми — верхня горизонтальна діаграма
+    // Об'єднаний масив кроків (Flow + Walkthrough + Algorithm Details)
     // ---------------------------------------------------------------------------
-    const flowSteps = [
+    const steps = [
         {
             id: "excel",
-            title: "Ввід Excel",
-            short: "Робоча книга з піками LC-MS",
-            tone: "slate"
-        },
-        {
-            id: "validate",
-            title: "Валідація рядків",
-            short: "Видалення неповних рядків",
-            tone: "amber"
+            title: "1. Вхідні дані та валідація",
+            short: "Читання Excel та обрізка",
+            tone: "slate",
+            summary: "Робоча книга зчитується, і система автоматично вибирає аркуш, що містить найбільше обов'язкових колонок (RT, Area, m/z). Відразу після цього всі неповні рядки (без ключових значень) видаляються.",
+            deepDive: "Цей крок гарантує чистоту даних. Рядки без базових LC-MS параметрів не підлягають подальшому розрахунку, і відхиляються до прийняття будь-яких наукових рішень.",
+            input: ["Робоча книга (один або кілька аркушів)", "Рядки піків"],
+            action: ["Обрати найбільш підходящий аркуш", "Видалити рядки без значень"],
+            output: ["Валідні рядки для аналізу"],
+            formula: "Sheet = MaxMatch(Headers, Req)  AND  Valid = (RT>0 & Area>0)",
+            formulaExplanation: "Шукаємо аркуш, де назви колонок найбільше схожі на потрібні. Залишаємо лише ті рядки, де є базові числа для аналізу."
         },
         {
             id: "classify",
-            title: "Призначення ролей",
-            short: "Sample / Blank / Replicate",
-            tone: "violet"
+            title: "2. Призначення ролей",
+            short: "Sample / Blank / Rep",
+            tone: "violet",
+            summary: "Кожному рядку призначається тип зразка (Sample або Blank) і він групується у кошик певної репліки. Далі всі обчислення відбуваються ізольовано для кожної полярності.",
+            deepDive: "Якщо оператор розфарбував клітинки в Excel (встановив колір для Blank чи певного Sample), система довіряє цьому кольору. Якщо кольору немає — розбирає ім'я файлу рядка.",
+            input: ["Валідні рядки", "Кольори клітинок Excel", "Імена файлів"],
+            action: ["Зчитати мітку оператора", "Застосувати логіку імені файлу (fallback)"],
+            output: ["Групування за (SampleType, Polarity)"],
+            formula: "Role = ColorMap[CellColor] || FileNameLogic(Name)",
+            formulaExplanation: "Кольорові мітки мають найвищий пріоритет. Немає кольору — аналізуємо текстову назву."
         },
         {
             id: "replicates",
-            title: "Підтвердження в реплікатах",
-            short: "Перевірка збігу RT та m/z",
-            tone: "blue"
+            title: "3. Кластеризація реплікатів",
+            short: "Підтвердження піків",
+            tone: "blue",
+            summary: "Піки з одного зразка, але різних вимірювань (реплікатів), групуються разом. Ми перевіряємо, що та сама хімічна сполука присутня в кількох вимірюваннях поспіль.",
+            deepDive: "Використовується жадібна кластеризація: пік з найбільшою площею стає центроїдом. З іншого кошика реплікатів обирається найближчий за (RT + m/z) пік. Якщо знайдено збіги в ≥ 2 різних кошиках, кластер вважається підтвердженим.",
+            input: ["Піки, розподілені по кошиках реплікатів"],
+            action: ["Сортування за спаданням площі", "Усереднення центроїда при додаванні", "Перевірка допусків"],
+            output: ["Підтверджені кластери"],
+            formula: "|RTкан − RTцен| ≤ Tol_RT  AND  Δm/z ≤ Tol_m/z",
+            formulaExplanation: "Щоб об'єднати піки з різних файлів, їхній час утримання (RT) та маса (m/z) мають бути майже однаковими (в межах допусків)."
         },
         {
             id: "blank",
-            title: "Порівняння з blank",
-            short: "Пошук фонового сигналу",
-            tone: "cyan"
+            title: "4. Blank Subtraction",
+            short: "Порівняння з фоном",
+            tone: "cyan",
+            summary: "Blank проходять кластеризацію незалежно. Далі кожен підтверджений зразок співставляється з найближчим blank-сигналом для оцінки фонового шуму хімічної матриці чи приладу.",
+            deepDive: "Шукаємо найближчий за відстанню (RT + m/z) кластер у blank. При рівності відстаней завжди вибираємо більший blank (песимістичний підхід) для гарантованого відсікання помилкових сигналів.",
+            input: ["Sample-кластери", "Blank-кластери"],
+            action: ["Пошук найближчого blank-кластера тієї ж полярності", "Обчислення S/B ratio"],
+            output: ["Пара [Sample ↔ Blank] із розрахованим відношенням"],
+            formula: "Ratio (S/B) = mean(Area_sample) / mean(Area_blank)",
+            formulaExplanation: "Ділимо середню площу в зразку на середню площу в холостій пробі. Середнє захищає від випадкових сплесків."
         },
         {
             id: "decision",
-            title: "Підсумкове рішення",
-            short: "Artifact або Real Compound",
-            tone: "green"
+            title: "5. Класифікація (Підсумкове рішення)",
+            short: "Artifact / Real Compound",
+            tone: "green",
+            summary: "Якщо знайдено відповідний blank, і сигнал зразка не перевищує фоновий шум у достатній мірі (поріг S/B), він відхиляється як артефакт.",
+            deepDive: "Цей бінарний поділ є ключовим бізнес-результатом скринінгу. Дозволяє хіміку сфокусуватись лише на реальних, чистих сполуках, відкинувши все забруднення.",
+            input: ["Відношення Signal-to-Blank (S/B)", "Поріг рішення"],
+            action: ["Порівняти відношення S/B з налаштованим порогом"],
+            output: ["Рішення: Artifact або Real Compound"],
+            formula: "Status = (Ratio < Threshold) ? \"Artifact\" : \"Real Compound\"",
+            formulaExplanation: "Якщо сигнал зразка недостатньо сильно виділяється на фоні холостої проби (blank), ми називаємо його Artifact."
         },
         {
             id: "output",
-            title: "Результат для аудиту",
-            short: "Метрики + журнал Why",
-            tone: "rose"
+            title: "6. Зведена статистика та аудит",
+            short: "Аудиторський слід",
+            tone: "rose",
+            summary: "Кожен крок, що привів до підсумкового висновку, разом із підсумковими статистичними метриками зберігається для регуляторного контролю.",
+            deepDive: "Глибокий лог рішення зберігається у полі 'Why' у форматі JSON. Разом з цим обчислюються середній RT, m/z, площа та показники варіабельності (CV%), а також бонус/штраф системи оцінки довіри.",
+            input: ["Підтверджені кластери зі статусом"],
+            action: ["Обчислення CV% та середніх", "Розрахунок показника довіри", "Серіалізація рішення"],
+            output: ["Підсумкова таблиця (готовий звіт Excel)"],
+            formula: "Score = 100 - Σ(Penalties) + Bonus",
+            formulaExplanation: "Рейтинг надійності від 0 до 100. Віднімаємо бали за відхилення маси/часу та розбіжності між реплікатами, додаємо за ідеальну чистоту від фону."
         }
     ];
 
-    // ---------------------------------------------------------------------------
-    // Кроки інтерактивного обходу — вміст покрокового навігатора
-    // ---------------------------------------------------------------------------
-    const walkthroughSteps = [
-        {
-            title: "1. Вхідні дані Excel",
-            summary:
-                "Додаток завантажує робочу книгу Excel і автоматично обирає аркуш, що найкраще відповідає необхідним колонкам.",
-            input: ["Робоча книга", "Один або кілька аркушів"],
-            action: ["Визначити необхідні заголовки", "Обрати найбільш підходящий аркуш"],
-            output: ["Структуровані рядки піків LC-MS"],
-            highlight: "Користувачу не потрібно вручну вибирати правильний аркуш у типовому випадку."
-        },
-        {
-            title: "2. Валідація рядків",
-            summary:
-                "Рядки без RT, Base Peak або Area видаляються, оскільки вони не можуть бути надійно перевірені.",
-            input: ["Рядки піків з Excel"],
-            action: ["Перевірити RT", "Перевірити Base Peak", "Перевірити Area"],
-            output: ["Залишаються лише придатні рядки"],
-            highlight: "Цей крок видаляє неповні дані до прийняття будь-якого наукового рішення."
-        },
-        {
-            title: "3. Призначення ролей рядкам",
-            summary:
-                "Кожен рядок класифікується як sample або blank. Кольорові мітки оператора мають пріоритет над евристикою за іменем файлу.",
-            input: ["Валідні рядки", "Кольори клітинок Excel", "Імена файлів"],
-            action: ["Зчитати мітку оператора", "За відсутності — використати логіку імені файлу"],
-            output: ["Призначення Sample / Blank / Replicate"],
-            highlight: "Явні мітки оператора перекривають припущення, засновані на іменах файлів."
-        },
-        {
-            title: "4. Підтвердження піків у реплікатах",
-            summary:
-                "Сигнал стає більш достовірним, якщо він трапляється більш ніж в одному реплікаті в межах налаштованих допусків RT та m/z.",
-            input: ["Рядки, згруповані за полярністю та реплікатом"],
-            action: ["Порівняти RT", "Порівняти m/z", "Застосувати правило «один пік на кошик»"],
-            output: ["Підтверджений кластер реплікатів"],
-            highlight: "Система перевіряє, що одну й ту саму сполуку виявлено повторно, а не лише один раз."
-        },
-        {
-            title: "5. Порівняння з blank",
-            summary:
-                "Кожен підтверджений sample-пік порівнюється з blank-піками тієї ж полярності для виявлення фонового сигналу або забруднення.",
-            input: ["Підтверджений sample-кластер", "Blank-піки"],
-            action: ["Знайти збіг із blank", "Обчислити відношення signal-to-blank"],
-            output: ["Пов'язаний із blank або чистий сигнал"],
-            highlight: "Це основний захист від хибнопозитивних результатів, спричинених фоновим сигналом."
-        },
-        {
-            title: "6. Підсумкове рішення",
-            summary:
-                "Якщо blank-сигнал занадто великий порівняно з sample-сигналом, результат позначається як Artifact. Інакше — Real Compound.",
-            input: ["Відношення Signal-to-Blank", "Поріг рішення"],
-            action: ["Порівняти відношення з порогом"],
-            output: ["Artifact або Real Compound"],
-            highlight: "Це бізнес-результат, який найбільше цікавить нетехнічних користувачів."
-        },
-        {
-            title: "7. Результат для аудиту",
-            summary:
-                "Додаток обчислює підсумкові метрики та зберігає пояснення рішення у полі Why для перевірки й аудиту.",
-            input: ["Підтверджене рішення"],
-            action: ["Обчислити середні", "Обчислити CV%", "Записати журнал Why"],
-            output: ["Підсумкова таблиця результатів"],
-            highlight: "Кожен важливий результат можна пояснити згодом."
-        }
-    ];
-
-    // ---------------------------------------------------------------------------
-    // Картки логіки рішень — правила «умова → результат»
-    // ---------------------------------------------------------------------------
-    const decisionCards = [
-        {
-            title: "Відсутні обов'язкові значення піку",
-            condition: "RT, Base Peak або Area відсутній",
-            result: "Рядок відкидається",
-            kind: "bad"
-        },
-        {
-            title: "Мітка оператора присутня",
-            condition: "Колір клітинки Excel збігається з відомою міткою оператора",
-            result: "Використовується явна роль з мітки",
-            kind: "info"
-        },
-        {
-            title: "Мітка оператора відсутня",
-            condition: "Немає відомої кольорової мітки",
-            result: "Використовується евристика за іменем файлу",
-            kind: "info"
-        },
-        {
-            title: "Підтвердження в реплікатах не пройшло",
-            condition: "RT або m/z поза допусками реплікатів",
-            result: "Пік не підтверджений",
-            kind: "bad"
-        },
-        {
-            title: "Збіг із blank знайдено і відношення занадто низьке",
-            condition: "Збіг із blank існує і S/B нижче порогу",
-            result: "Artifact",
-            kind: "bad"
-        },
-        {
-            title: "Проблем із blank немає",
-            condition: "Немає збігу з blank або прийнятне відношення S/B",
-            result: "Real Compound",
-            kind: "good"
-        }
-    ];
-
-    // ---------------------------------------------------------------------------
-    // Типовий приклад — конкретний обхід одного піку
-    // ---------------------------------------------------------------------------
-    const typicalExample = {
-        samplePeak: {
-            rt: 2.35,
-            mz: 195.08,
-            area: 1250000,
-            polarity: "positive",
-            file: "1_pos.d"
-        },
-        replicateMatch: {
-            rt: 2.36,
-            mz: 195.09,
-            area: 1180000,
-            polarity: "positive",
-            file: "2_pos.d"
-        },
-        blankPeak: {
-            rt: 2.34,
-            mz: 195.07,
-            area: 85000,
-            polarity: "positive",
-            file: "blank_pos.d"
-        },
-        results: {
-            rtMean: 2.355,
-            mzMean: 195.085,
-            areaMean: 1215000,
-            cvPct: 4.1,
-            signalToBlank: 14.3,
-            status: "Real Compound" as const
-        }
-    };
-
-    // ---------------------------------------------------------------------------
-    // Стан компонента (Svelte 5 runes)
-    // ---------------------------------------------------------------------------
     let current = $state(0);
-    let step = $derived(walkthroughSteps[current]);
+    let activeStep = $derived(steps[current]);
 
-    // ---------------------------------------------------------------------------
-    // Навігація
-    // ---------------------------------------------------------------------------
-    function next() {
-        if (current < walkthroughSteps.length - 1) current += 1;
-    }
+    // Throttle для скролу мишею
+    let lastScrollTime = 0;
+    const scrollThrottle = 500; // мс
 
-    function prev() {
-        if (current > 0) current -= 1;
-    }
+    function handleWheel(e: WheelEvent) {
+        // Дозволяємо системний скрол, якщо дельта по X більша (горизонтальний скрол мишею)
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
 
-    function jumpTo(index: number) {
-        current = index;
-    }
+        const now = Date.now();
+        if (now - lastScrollTime < scrollThrottle) return;
 
-    // ---------------------------------------------------------------------------
-    // Стилі
-    // ---------------------------------------------------------------------------
-    function toneClasses(tone: string) {
-        switch (tone) {
-            case "amber":
-                return "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200";
-            case "violet":
-                return "border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-200";
-            case "blue":
-                return "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200";
-            case "cyan":
-                return "border-cyan-200 bg-cyan-50 text-cyan-900 dark:border-cyan-900 dark:bg-cyan-950 dark:text-cyan-200";
-            case "green":
-                return "border-green-200 bg-green-50 text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-200";
-            case "rose":
-                return "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200";
-            default:
-                return "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200";
+        if (Math.abs(e.deltaY) > 10) {
+            if (e.deltaY > 0 && current < steps.length - 1) {
+                current++;
+                lastScrollTime = now;
+                e.preventDefault();
+            } else if (e.deltaY < 0 && current > 0) {
+                current--;
+                lastScrollTime = now;
+                e.preventDefault();
+            }
         }
     }
 
-    function cardClasses(kind: string) {
-        switch (kind) {
-            case "good":
-                return "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950";
-            case "bad":
-                return "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950";
-            default:
-                return "border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950";
+    function toneClasses(tone: string, isCurrent: boolean) {
+        if (isCurrent) {
+            switch (tone) {
+                case "amber": return "border-amber-400 bg-amber-50 shadow-md ring-2 ring-amber-400/20 dark:border-amber-500 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100";
+                case "violet": return "border-violet-400 bg-violet-50 shadow-md ring-2 ring-violet-400/20 dark:border-violet-500 dark:bg-violet-900/40 text-violet-900 dark:text-violet-100";
+                case "blue": return "border-blue-400 bg-blue-50 shadow-md ring-2 ring-blue-400/20 dark:border-blue-500 dark:bg-blue-900/40 text-blue-900 dark:text-blue-100";
+                case "cyan": return "border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-400/20 dark:border-cyan-500 dark:bg-cyan-900/40 text-cyan-900 dark:text-cyan-100";
+                case "green": return "border-green-400 bg-green-50 shadow-md ring-2 ring-green-400/20 dark:border-green-500 dark:bg-green-900/40 text-green-900 dark:text-green-100";
+                case "rose": return "border-rose-400 bg-rose-50 shadow-md ring-2 ring-rose-400/20 dark:border-rose-500 dark:bg-rose-900/40 text-rose-900 dark:text-rose-100";
+                default: return "border-slate-400 bg-slate-50 shadow-md ring-2 ring-slate-400/20 dark:border-slate-500 dark:bg-slate-800 text-slate-900 dark:text-slate-100";
+            }
+        } else {
+            // Unselected state (faded, glass-like)
+            return "border-slate-200/60 bg-white/40 opacity-70 hover:opacity-100 hover:bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/30 text-slate-600 dark:text-slate-400 backdrop-blur-sm transition-all";
         }
     }
 
-    function badgeClasses(kind: string) {
-        switch (kind) {
-            case "good":
-                return "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200";
-            case "bad":
-                return "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200";
-            default:
-                return "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200";
-        }
-    }
+    // Допоміжна функція для безпечного парсингу термінів і заміни їх на тултипи
+    // Так як Svelte не підтримує динамічні компоненти всередині рядків @html легко, 
+    // ми зробили це захардкодженим на рівні шаблону (або за допомогою ручного парсингу).
+    // Оскільки ми хочемо працювати з GlossaryTooltip компонентом:
 </script>
 
 <!-- ======================================================================= -->
-<!-- В одному реченні                                                        -->
+<!-- ОГЛЯДОВИЙ ХЕДЕР -->
 <!-- ======================================================================= -->
-<section class="mb-8 rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-6 shadow-sm dark:border-blue-900 dark:from-blue-950 dark:to-indigo-950">
+<div 
+    onwheel={handleWheel}
+    class="mb-6 rounded-3xl border border-blue-200 bg-white p-6 shadow-sm transition-colors hover:border-blue-400 dark:border-slate-800 dark:bg-slate-900/50 dark:hover:border-slate-600"
+>
     <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-900/60 dark:text-blue-300">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4" />
-                <path d="M12 8h.01" />
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/30">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
             </svg>
         </div>
         <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-500 dark:text-blue-400">
-                В одному реченні
-            </p>
-            <p class="mt-2 text-base leading-8 text-blue-900 dark:text-blue-100">
-                Система зчитує вихідні піки LC-MS з Excel, валідує їх, підтверджує кожен сигнал у реплікатах,
-                порівнює з blank і позначає результат як <strong>Real Compound</strong> або
-                <strong>Artifact</strong> — із повним аудиторським слідом, що пояснює чому.
+            <h2 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Єдиний алгоритм скринінгу</h2>
+            <p class="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                Гортайте колесом миші або натискайте на блоки нижче.
+                Дізнайтеся, як ми перевіряємо <GlossaryTooltip term="Replicate" definition={defs["Replicate"]} /> та відсікаємо фон по <GlossaryTooltip term="Blank" definition={defs["Blank"]} />.
             </p>
         </div>
     </div>
-</section>
+</div>
 
 <!-- ======================================================================= -->
-<!-- Блок-схема — горизонтальні картки кроків, з'єднані стрілками           -->
+<!-- ГОРИЗОНТАЛЬНИЙ НАВІГАТОР (БЛОК-СХЕМА) -->
 <!-- ======================================================================= -->
-<section class="mb-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-    <div class="mb-6">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Простой візуальний огляд
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            Як працює скринінг
-        </h2>
-        <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-400">
-            Система бере вихідні піки LC-MS з Excel, видаляє неповні рядки, підтверджує сигнали у реплікатах,
-            перевіряє їх за blank і потім видає підсумковий результат з поясненням.
-        </p>
-    </div>
-
-    <div class="overflow-x-auto pb-2">
-        <div class="flex min-w-[980px] items-stretch gap-3">
-            {#each flowSteps as item, i}
-                <div class="flex w-[170px] shrink-0 flex-col rounded-2xl border p-4 {toneClasses(item.tone)}">
-                    <div class="mb-3 flex items-center justify-between">
-                        <span class="text-xs font-semibold uppercase tracking-wide opacity-70">
-                            Крок {i + 1}
-                        </span>
-                        <span class="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold dark:bg-black/20">
-                            {item.id}
-                        </span>
-                    </div>
-
-                    <p class="text-sm font-semibold">{item.title}</p>
-                    <p class="mt-2 text-xs leading-6 opacity-80">{item.short}</p>
-                </div>
-
-                {#if i < flowSteps.length - 1}
-                    <div class="flex shrink-0 items-center justify-center px-1 text-slate-300 dark:text-slate-600">
-                        <svg width="32" height="24" viewBox="0 0 32 24" fill="none" aria-hidden="true">
-                            <path d="M2 12H26" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-                            <path d="M20 6L26 12L20 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                    </div>
-                {/if}
-            {/each}
-        </div>
-    </div>
-</section>
-
-<!-- ======================================================================= -->
-<!-- Інтерактивний обхід — покроковий навігатор                              -->
-<!-- ======================================================================= -->
-<section class="mb-10">
-    <div class="mb-4">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Інтерактивний обхід
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            Покрокове пояснення
-        </h2>
-    </div>
-
-    <!-- Прогрес-бар -->
-    <div class="mb-6 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-        <div
-            class="h-full rounded-full bg-blue-600 transition-all duration-300"
-            style="width:{((current + 1) / walkthroughSteps.length) * 100}%"
-        ></div>
-    </div>
-
-    <div class="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <!-- Основна панель вмісту -->
-        <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <div class="flex flex-wrap items-center gap-3">
-                <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-800 dark:bg-blue-950 dark:text-blue-200">
-                    Поточний крок
-                </span>
-                <p class="text-sm font-semibold text-slate-500 dark:text-slate-400">
-                    {step.title}
-                </p>
-            </div>
-
-            <p class="mt-5 text-base leading-8 text-slate-700 dark:text-slate-300">
-                {step.summary}
-            </p>
-
-            <div class="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                <p class="text-xs font-semibold uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">
-                    Чому це важливо
-                </p>
-                <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">
-                    {step.highlight}
-                </p>
-            </div>
-
-            <div class="mt-6 grid gap-4 md:grid-cols-3">
-                <!-- Колонка «Вхід» -->
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Вхід
-                    </p>
-                    <div class="mt-3 space-y-2">
-                        {#each step.input as item}
-                            <div class="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-
-                <!-- Колонка «Дія» -->
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Що робить система
-                    </p>
-                    <div class="mt-3 space-y-2">
-                        {#each step.action as item}
-                            <div class="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-
-                <!-- Колонка «Вихід» -->
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Вихід
-                    </p>
-                    <div class="mt-3 space-y-2">
-                        {#each step.output as item}
-                            <div class="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Бічна навігація -->
-        <aside class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                Навігація по кроках
-            </p>
-
-            <div class="mt-4 space-y-3">
-                {#each walkthroughSteps as s, i}
-                    <button
-                        class="w-full rounded-2xl border px-4 py-3 text-left transition {i === current
-                            ? 'border-blue-500 bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950 dark:text-blue-200'
-                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400'}"
-                        onclick={() => jumpTo(i)}
-                    >
-                        <span class="block text-sm font-semibold">{s.title}</span>
-                    </button>
-                {/each}
-            </div>
-
-            <div class="mt-6 flex gap-3">
-                <button
-                    onclick={prev}
-                    disabled={current === 0}
-                    class="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300"
-                >
-                    Назад
-                </button>
-
-                <button
-                    onclick={next}
-                    disabled={current === walkthroughSteps.length - 1}
-                    class="rounded-2xl bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-40"
-                >
-                    Далі
-                </button>
-            </div>
-        </aside>
-    </div>
-</section>
-
-<!-- ======================================================================= -->
-<!-- Картки логіки рішень                                                    -->
-<!-- ======================================================================= -->
-<section class="mb-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-    <div class="mb-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Логіка рішень
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            Чому результат стає Artifact або Real Compound
-        </h2>
-    </div>
-
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {#each decisionCards as card}
-            <div class="rounded-2xl border p-4 {cardClasses(card.kind)}">
-                <div class="flex items-center justify-between gap-3">
-                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {card.title}
-                    </p>
-                    <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide {badgeClasses(card.kind)}">
-                        {card.kind === "good" ? "добрий" : card.kind === "bad" ? "поганий" : "інфо"}
+<div 
+    onwheel={handleWheel}
+    class="relative w-full overflow-x-auto pb-4 scrollbar-hide"
+>
+    <div class="flex min-w-[900px] items-stretch gap-3 px-1">
+        {#each steps as st, i}
+            <button 
+                onclick={() => (current = i)}
+                class="group relative flex w-[160px] shrink-0 cursor-pointer flex-col rounded-2xl border p-4 text-left transition-all duration-300 {toneClasses(st.tone, current === i)}"
+            >
+                <div class="mb-2 flex items-center justify-between">
+                    <span class="text-[9px] font-bold uppercase tracking-wider opacity-60">
+                        {current === i ? "Активовано" : `Крок ${i + 1}`}
                     </span>
                 </div>
-
-                <div class="mt-4 space-y-3">
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                            Умова
-                        </p>
-                        <p class="mt-1 text-sm leading-7 text-slate-700 dark:text-slate-300">
-                            {card.condition}
-                        </p>
-                    </div>
-
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                            Результат
-                        </p>
-                        <p class="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                            {card.result}
-                        </p>
-                    </div>
+                <p class="text-sm font-bold tracking-tight leading-tight">{st.title.replace(/^\d+\.\s*/, '')}</p>
+            </button> 
+            
+            {#if i < steps.length - 1}
+                <div class="flex shrink-0 items-center justify-center text-slate-300 dark:text-slate-600">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="transition-colors {current === i ? 'text-blue-400 dark:text-blue-500' : ''}">
+                        <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
                 </div>
-            </div>
+            {/if}
         {/each}
     </div>
-</section>
+</div>
 
 <!-- ======================================================================= -->
-<!-- Типовий приклад — конкретний обхід одного піку                          -->
+<!-- ДЕТАЛЬНИЙ FULL-WIDTH ОГЛЯД КРОКУ -->
 <!-- ======================================================================= -->
-<section class="mb-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-    <div class="mb-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Типовий приклад
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            Один пік — від вихідного сигналу до підсумкового вердикту
-        </h2>
-        <p class="mt-2 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-400">
-            Нижче наведено конкретний приклад того, як один пік LC-MS проходить через конвеєр —
-            від початкового вимірювання зразка, через підтвердження в реплікатах і порівняння з blank,
-            до остаточної класифікації.
-        </p>
+<div 
+    class="relative mb-12 flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/40 backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-900/80 dark:shadow-none"
+>
+    
+    <!-- Top Progress Bar overlay -->
+    <div class="absolute left-0 top-0 h-1 w-full bg-slate-100 dark:bg-slate-800">
+        <div class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out" style="width: {((current + 1) / steps.length) * 100}%"></div>
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-3">
-        <!-- Пік зразка -->
-        <div class="rounded-2xl border border-violet-200 bg-violet-50 p-5 dark:border-violet-900 dark:bg-violet-950">
-            <div class="mb-3 flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-violet-200 text-xs font-bold text-violet-800 dark:bg-violet-800 dark:text-violet-100">S</span>
-                <p class="text-sm font-semibold text-violet-900 dark:text-violet-200">Пік зразка</p>
-            </div>
-            <div class="space-y-2 text-sm">
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">RT</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.samplePeak.rt} хв</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">m/z</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.samplePeak.mz}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Площа</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.samplePeak.area.toLocaleString()}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Файл</span>
-                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{typicalExample.samplePeak.file}</span>
-                </div>
-            </div>
-        </div>
+    <!-- Container with fixed min-height to prevent page jumping -->
+    <div class="min-h-[480px] p-6 lg:p-8">
+        {#key current}
+            <div in:fade={{ duration: 300, easing: cubicOut, delay: 50 }}>
+                <div class="flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
+                    
+                    <!-- Ліва частина: Суть і Опис -->
+                    <div class="flex-1 lg:max-w-2xl">
+                        <div class="mb-3 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-400">
+                            <span>{activeStep.id}</span>
+                        </div>
+                        
+                        <h3 class="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                            {activeStep.title}
+                        </h3>
+                        
+                        <p class="mt-4 text-base leading-relaxed text-slate-600 dark:text-slate-300">
+                            {activeStep.summary}
+                        </p>
 
-        <!-- Збіг у реплікаті -->
-        <div class="rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950">
-            <div class="mb-3 flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-blue-200 text-xs font-bold text-blue-800 dark:bg-blue-800 dark:text-blue-100">R</span>
-                <p class="text-sm font-semibold text-blue-900 dark:text-blue-200">Збіг у реплікаті</p>
-            </div>
-            <div class="space-y-2 text-sm">
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">RT</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.replicateMatch.rt} хв</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">m/z</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.replicateMatch.mz}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Площа</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.replicateMatch.area.toLocaleString()}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Файл</span>
-                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{typicalExample.replicateMatch.file}</span>
-                </div>
-            </div>
-            <div class="mt-3 rounded-xl border border-blue-200 bg-blue-100/60 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
-                ΔRT = 0.01 хв ✓ &nbsp;·&nbsp; Δm/z = 0.01 Da ✓
-            </div>
-        </div>
+                        <div class="mt-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800/60 dark:bg-slate-800/20">
+                            <h4 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                                <svg class="h-4 w-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                Детальний розгляд
+                            </h4>
+                            <p class="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                                {activeStep.deepDive}
+                            </p>
+                        </div>
+                    </div>
 
-        <!-- Пік blank -->
-        <div class="rounded-2xl border border-cyan-200 bg-cyan-50 p-5 dark:border-cyan-900 dark:bg-cyan-950">
-            <div class="mb-3 flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-200 text-xs font-bold text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">B</span>
-                <p class="text-sm font-semibold text-cyan-900 dark:text-cyan-200">Пік blank</p>
+                    <!-- Права частина: I/O Панель -->
+                    <div class="w-full shrink-0 lg:w-72">
+                        <div class="rounded-2xl border border-slate-100 bg-slate-50 p-5 dark:border-slate-700/50 dark:bg-slate-800/40">
+                            
+                            <div class="mb-5">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">📥 На вході</p>
+                                <ul class="mt-2 space-y-1.5">
+                                    {#each activeStep.input as i}
+                                        <li class="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
+                                            <span class="mt-1.5 flex h-1 w-1 shrink-0 rounded-full bg-slate-300 dark:bg-slate-500"></span>
+                                            {i}
+                                        </li>
+                                    {/each}
+                                </ul>
+                            </div>
+                            
+                            <div class="mb-5">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-blue-500 dark:text-blue-400">⚡ Дії системи</p>
+                                <ul class="mt-2 space-y-1.5 border-l-2 border-blue-100 pl-3 dark:border-blue-900/50">
+                                    {#each activeStep.action as a}
+                                        <li class="text-xs font-medium text-slate-800 dark:text-slate-200">{a}</li>
+                                    {/each}
+                                </ul>
+                            </div>
+
+                            <div>
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-emerald-500 dark:text-emerald-400">📤 На виході</p>
+                                <ul class="mt-2 space-y-1.5">
+                                    {#each activeStep.output as o}
+                                        <li class="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
+                                            <svg class="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                                            {o}
+                                        </li>
+                                    {/each}
+                                </ul>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Математичний блок знизу - Вертикальний формат -->
+                <div class="mt-8 overflow-hidden rounded-2xl border border-indigo-100 bg-indigo-50/30 dark:border-indigo-900/30 dark:bg-indigo-900/10">
+                    <div class="border-b border-indigo-100 bg-indigo-50 px-5 py-2.5 dark:border-indigo-900/50 dark:bg-indigo-900/20">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                            Математика та Логіка
+                        </p>
+                    </div>
+                    <div class="p-5">
+                        <div class="font-mono text-base font-bold text-slate-900 dark:text-indigo-100 md:text-lg">
+                            {activeStep.formula}
+                        </div>
+                        <div class="mt-3 border-t border-indigo-100 pt-3 dark:border-indigo-900/40">
+                            <p class="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                                <span class="mr-1 font-semibold text-indigo-700 dark:text-indigo-300">Пояснення:</span> 
+                                {activeStep.formulaExplanation}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Кнопки навігації Всередині Картки -->
+                <div class="mt-8 flex items-center justify-between border-t border-slate-100 pt-6 dark:border-slate-800">
+                    <button
+                        onclick={() => current > 0 && current--}
+                        class="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                        disabled={current === 0}
+                    >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Попередній
+                    </button>
+                    <div class="text-xs font-bold text-slate-400 dark:text-slate-500">
+                        {current + 1} / {steps.length}
+                    </div>
+                    <button
+                        onclick={() => current < steps.length - 1 && current++}
+                        class="flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-transform hover:scale-105 disabled:opacity-30 dark:bg-white dark:text-slate-900"
+                        disabled={current === steps.length - 1}
+                    >
+                        Далі
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
             </div>
-            <div class="space-y-2 text-sm">
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">RT</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.blankPeak.rt} хв</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">m/z</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.blankPeak.mz}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Площа</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.blankPeak.area.toLocaleString()}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Файл</span>
-                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{typicalExample.blankPeak.file}</span>
-                </div>
-            </div>
-            <div class="mt-3 rounded-xl border border-cyan-200 bg-cyan-100/60 px-3 py-2 text-xs text-cyan-700 dark:border-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
-                Збіг із blank знайдено · S/B = {typicalExample.results.signalToBlank} ≥ 3.0 ✓
-            </div>
-        </div>
+        {/key}
     </div>
-
-    <!-- Підсумковий вердикт -->
-    <div class="mt-5 rounded-2xl border border-green-200 bg-green-50 p-5 dark:border-green-900 dark:bg-green-950">
-        <div class="flex flex-wrap items-center gap-4">
-            <span class="rounded-full bg-green-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-green-800 dark:bg-green-900/60 dark:text-green-200">
-                {typicalExample.results.status}
-            </span>
-            <div class="flex flex-wrap gap-4 text-sm text-green-800 dark:text-green-300">
-                <span>RT<sub>сер</sub> = {typicalExample.results.rtMean}</span>
-                <span>m/z<sub>сер</sub> = {typicalExample.results.mzMean}</span>
-                <span>Площа<sub>сер</sub> = {typicalExample.results.areaMean.toLocaleString()}</span>
-                <span>CV% = {typicalExample.results.cvPct}</span>
-                <span>S/B = {typicalExample.results.signalToBlank}</span>
-            </div>
-        </div>
-    </div>
-</section>
+</div>

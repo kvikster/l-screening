@@ -320,7 +320,7 @@
     class="min-h-screen bg-slate-50 dark:bg-slate-900"
     class:pt-12={updateReady}
 >
-    <div class="px-6 py-8">
+    <div class="px-4 pb-0 pt-4">
         {#if !dashboardProps}
             <div
                 class="mx-auto grid max-w-5xl gap-5 rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:grid-cols-[1.05fr_0.95fr]"

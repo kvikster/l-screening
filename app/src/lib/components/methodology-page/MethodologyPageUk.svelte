@@ -33,6 +33,7 @@
 -->
 <script lang="ts">
     import MethodologyVisualizerUk from "./MethodologyVisualizerUk.svelte";
+    import GlossaryTooltip from "./GlossaryTooltip.svelte";
 
     // ---------------------------------------------------------------------------
     // Масиви даних — таблиці вмісту
@@ -156,6 +157,8 @@
         ["Confidence score", "Узагальнений показник довіри до піка."],
     ];
 
+    const glossaryMap = Object.fromEntries(glossary);
+
     /**
      * Зовнішні довідкові посилання для поглибленого вивчення основних концепцій.
      *
@@ -232,18 +235,20 @@
                 <a href="#input" class="hover:underline">1. Вхідні дані</a>
                 <a href="#columns" class="hover:underline">2. Колонки Excel</a>
                 <a href="#marks" class="hover:underline">3. Мітки оператора</a>
-                <a href="#algorithm" class="hover:underline">4. Алгоритм</a>
-                <a href="#output" class="hover:underline">5. Вихідні поля</a>
-                <a href="#params" class="hover:underline">6. Параметри</a>
-                <a href="#glossary" class="hover:underline">7. Глосарій</a>
-                <a href="#references" class="hover:underline">8. Посилання</a>
+                <a href="#algorithm" class="hover:underline">4. Алгоритм (Інтерактивний посібник)</a>
+                <a href="#output" class="hover:underline">4. Вихідні поля</a>
+                <a href="#params" class="hover:underline">5. Параметри</a>
+                <a href="#glossary" class="hover:underline">6. Глосарій</a>
+                <a href="#references" class="hover:underline">7. Посилання</a>
             </div>
         </nav>
 
         <!-- ----------------------------------------------------------------->
         <!-- Інтерактивний візуальний огляд                                   -->
         <!-- ----------------------------------------------------------------->
-        <MethodologyVisualizerUk />
+        <div id="algorithm">
+            <MethodologyVisualizerUk defs={glossaryMap} />
+        </div>
 
         <!-- ----------------------------------------------------------------->
         <!-- Розділ 1: Вхідні дані                                            -->
@@ -332,78 +337,10 @@
             </div>
         </section>
 
-        <!-- ----------------------------------------------------------------->
-        <!-- Розділ 4: Алгоритм — чотириетапний конвеєр скринінгу             -->
-        <!-- ----------------------------------------------------------------->
-        <!--
-          Основний методологічний зміст. Чотири етапи відображаються як
-          послідовні картки, кожна описує стадію конвеєра:
 
-          Крок 1 — Попередня обробка:
-            Рядки без RT, Base Peak або Area відкидаються (валідація даних).
-            Рядки, що пройшли перевірку, отримують SampleType на основі міток
-            оператора (найвищий пріоритет) або розбору імені файлу (запасна евристика).
-
-          Крок 2 — Грубий скринінг (кластеризація реплікатів):
-            Піки групуються між «кошиками» реплікатів жадібним алгоритмом.
-            Правило «не більше одного піку з кошика» запобігає вкладу
-            кількох піків одного реплікату в один кластер.
-            Підтвердження вимагає збігу І по RT, І по m/z у межах
-            відповідних порогів (показано в блоці формул).
-
-          Крок 3 — Blank subtraction:
-            Кожен підтверджений sample-кластер зіставляється з blank-піками
-            тієї ж полярності іонізації. Обчислюється S/B ratio для пари.
-            Логіка класифікації:
-              - Artifact:      знайдено збіг із blank І S/B < signal_to_blank_min
-              - Real Compound: немає збігу з blank АБО S/B ≥ signal_to_blank_min
-
-          Крок 4 — Summary і аудиторський слід:
-            Обчислюється агрегатна статистика по групах SampleType × Polarity.
-            JSON-поле `Why` фіксує повний ланцюжок рішень (які пороги
-            перевірялися, які значення порівнювалися) для регуляторного аудиту.
-        -->
-        <section id="algorithm" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">4. Алгоритм</h2>
-            <div class="space-y-4">
-                <!-- Крок 1: Попередня обробка — валідація даних і класифікація рядків -->
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">Крок 1. Попередня обробка</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">Рядки без RT, Base Peak або Area відкидаються. Далі кожному рядку призначається SampleType на основі operator mark або filename fallback.</p>
-                </div>
-
-                <!-- Крок 2: Грубий скринінг — кластеризація піків реплікатів у вікнах толерантності -->
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">Крок 2. Грубий скринінг</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">Піки кластеризуються між кошиками реплікатів за правилом "не більше одного піку з кошика". Підтвердження вимагає збігу по RT і m/z у межах порогів для реплікатів.</p>
-                    <!-- Математична формулювання критеріїв зіставлення -->
-                    <div class="mt-3 rounded-xl bg-slate-50 px-4 py-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                        <p>|RT₁ − RT₂| ≤ replicate_rt_tol</p>
-                        <p>|mz₁ − mz₂| ≤ replicate_mz_tol</p>
-                    </div>
-                </div>
-
-                <!-- Крок 3: Blank subtraction — виявлення артефактів через S/B ratio -->
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">Крок 3. Blank subtraction</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">Підтверджені sample-піки порівнюються з blank-піками тієї ж полярності. Для зіставленої пари обчислюється S/B ratio.</p>
-                    <!-- Картки бінарної класифікації -->
-                    <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                        <div class="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300"><strong>Artifact</strong>: знайдено збіг із blank і S/B нижче порога.</div>
-                        <div class="rounded-xl border border-green-200 bg-green-50 p-3 text-xs text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-300"><strong>Real Compound</strong>: збіг із blank відсутній або S/B достатній.</div>
-                    </div>
-                </div>
-
-                <!-- Крок 4: Зведена статистика і формування аудиторського сліду -->
-                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">Крок 4. Summary і аудиторський слід</p>
-                    <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">Для кожного SampleType / Polarity рахується зведена статистика, а поле <code class="rounded bg-slate-100 px-1 font-mono dark:bg-slate-700">Why</code> зберігає журнал рішення для перевірки та аудиту.</p>
-                </div>
-            </div>
-        </section>
 
         <!-- ----------------------------------------------------------------->
-        <!-- Розділ 5: Вихідні поля                                           -->
+        <!-- Розділ 4: Вихідні поля                                           -->
         <!-- ----------------------------------------------------------------->
         <!--
           Відображає масив `outputFields` як вертикальний список карток.
@@ -411,7 +348,7 @@
           Це колонки, які користувач побачить у фінальному screened Excel-файлі.
         -->
         <section id="output" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">5. Вихідні поля</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">4. Вихідні поля</h2>
             <div class="space-y-3">
                 {#each outputFields as field}
                     <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -423,7 +360,7 @@
         </section>
 
         <!-- ----------------------------------------------------------------->
-        <!-- Розділ 6: Параметри толерантності                                -->
+        <!-- Розділ 5: Параметри толерантності                                -->
         <!-- ----------------------------------------------------------------->
         <!--
           Відображає масив `params` як чотириколонкову HTML-таблицю.
@@ -434,7 +371,7 @@
             row[3] → етап конвеєра, що використовує параметр
         -->
         <section id="params" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">6. Параметри толерантності</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">5. Параметри толерантності</h2>
             <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                 <table class="w-full text-sm">
                     <thead class="bg-slate-50 dark:bg-slate-700">
@@ -460,7 +397,7 @@
         </section>
 
         <!-- ----------------------------------------------------------------->
-        <!-- Розділ 7: Глосарій                                               -->
+        <!-- Розділ 6: Глосарій                                               -->
         <!-- ----------------------------------------------------------------->
         <!--
           Відображає масив `glossary` як двоколонкову сітку карток.
@@ -469,7 +406,7 @@
           що використовуються в документації методології.
         -->
         <section id="glossary" class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">7. Глосарій</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">6. Глосарій</h2>
             <div class="grid gap-3 sm:grid-cols-2">
                 {#each glossary as item}
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
@@ -481,7 +418,7 @@
         </section>
 
         <!-- ----------------------------------------------------------------->
-        <!-- Розділ 8: Посилання                                              -->
+        <!-- Розділ 7: Посилання                                              -->
         <!-- ----------------------------------------------------------------->
         <!--
           Відображає масив `refs` як вертикальний список вихідних посилань.
@@ -490,7 +427,7 @@
           tab-napping-атакам.
         -->
         <section id="references" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">8. Посилання</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">7. Посилання</h2>
             <p class="mb-4 text-sm leading-7 text-slate-600 dark:text-slate-400">Базові терміни й регуляторний контекст, на які спирається ця методика.</p>
             <div class="space-y-3">
                 {#each refs as ref}

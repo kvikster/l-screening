@@ -1,645 +1,686 @@
 <!--
-  @file MethodologyVisualizer.svelte
+  @file MethodologyVisualizerEn.svelte
   @description
-  Interactive visual overview of the LC-MS screening pipeline.
-  Contains three sections:
-    1. Flow diagram — horizontal step cards connected by arrows
-    2. Interactive walkthrough — step-by-step stepper with input/action/output details
-    3. Decision logic cards — condition → result rules for Artifact / Real Compound
-
-  Uses Svelte 5 runes ($state, $derived) and native Tailwind dark-mode classes.
-  No external runtime dependencies (Mermaid, D3, etc.) — pure HTML/SVG/CSS.
+  English-language interactive visualization of the LC-MS screening pipeline.
+  Two-panel layout: vertical stepper nav + viewport-fitted content card.
+  Each step has two tabs: Overview (visual I/O) and Reference (detailed docs).
 -->
 <script lang="ts">
-    // ---------------------------------------------------------------------------
-    // Flow Steps — Top horizontal diagram
-    // ---------------------------------------------------------------------------
-    const flowSteps = [
+    import GlossaryTooltip from "./GlossaryTooltip.svelte";
+    import { fade } from 'svelte/transition';
+    import { cubicOut } from 'svelte/easing';
+
+    let { defs = {} }: { defs: Record<string, string> } = $props();
+
+    // ── Steps ────────────────────────────────────────────────────────────
+    const steps = [
         {
             id: "excel",
-            title: "Excel input",
-            short: "Workbook with LC-MS peaks",
-            tone: "slate"
-        },
-        {
-            id: "validate",
-            title: "Validate rows",
-            short: "Remove incomplete rows",
-            tone: "amber"
+            title: "Data Input & Validation",
+            short: "Excel reading & cleaning",
+            tone: "slate",
+            summary: "The workbook is read, and the system automatically selects the sheet containing the most required columns (RT, Area, m/z). All incomplete rows are discarded.",
+            deepDive: "This step ensures data integrity. Rows without basic LC-MS parameters are ineligible for further calculation and are rejected before any scientific decisions are made.",
+            input: ["Workbook (one or more sheets)", "Peak rows"],
+            action: ["Select best-matching sheet", "Remove incomplete rows"],
+            output: ["Valid rows for analysis"],
+            formula: "Sheet = MaxMatch(Headers, Req)  AND  Valid = (RT>0 & Area>0)",
+            formulaExplanation: "We search for the sheet where column names best match requirements. Only rows with basic numeric data are kept."
         },
         {
             id: "classify",
-            title: "Assign roles",
-            short: "Sample / Blank / Replicate",
-            tone: "violet"
+            title: "Role Assignment",
+            short: "Sample / Blank / Rep",
+            tone: "violet",
+            summary: "Each row is assigned a sample type (Sample or Blank) and grouped into a specific replicate bucket. Subsequent calculations happen per polarity.",
+            deepDive: "If the operator colored cells in Excel, the system trusts this color. If no color is present, it falls back to parsing the row's filename.",
+            input: ["Valid rows", "Excel cell colors", "File names"],
+            action: ["Read operator marks", "Apply filename logic (fallback)"],
+            output: ["Grouping by (SampleType, Polarity)"],
+            formula: "Role = ColorMap[CellColor] || FileNameLogic(Name)",
+            formulaExplanation: "Operator colors have the highest priority. If missing, the system analyzes the text name for patterns."
         },
         {
             id: "replicates",
-            title: "Confirm in replicates",
-            short: "Check RT and m/z match",
-            tone: "blue"
+            title: "Replicate Clustering",
+            short: "Peak confirmation",
+            tone: "blue",
+            summary: "Peaks from the same sample but different measurements (replicates) are grouped. We verify the same compound is present in multiple measurements.",
+            deepDive: "Greedy clustering: the peak with the largest area becomes the seed. From other replicate buckets, the closest peak in (RT + m/z) is selected. If matches are found in \u2265 2 buckets, the cluster is confirmed.",
+            input: ["Peaks in replicate buckets"],
+            action: ["Sort by descending Area", "Average centroid upon addition", "Verify tolerance windows"],
+            output: ["Confirmed clusters"],
+            formula: "|RT_cand \u2212 RT_cent| \u2264 Tol_RT  AND  \u0394m/z \u2264 Tol_m/z",
+            formulaExplanation: "To merge peaks from different files, their retention time and mass must be nearly identical (within configured tolerances)."
         },
         {
             id: "blank",
-            title: "Compare with blank",
-            short: "Find background signal",
-            tone: "cyan"
+            title: "Blank Subtraction",
+            short: "Background comparison",
+            tone: "cyan",
+            summary: "Blanks undergo independent clustering. Each confirmed sample is matched against the nearest blank signal to assess background noise.",
+            deepDive: "We look for the nearest (RT + m/z) cluster in the blank. In case of ties, the larger blank is chosen (pessimistic approach) to ensure robust background filtering.",
+            input: ["Sample clusters", "Blank clusters"],
+            action: ["Find nearest blank cluster (same polarity)", "Calculate S/B ratio"],
+            output: ["Sample \u2194 Blank pairs with ratios"],
+            formula: "Ratio (S/B) = mean(Area_sample) / mean(Area_blank)",
+            formulaExplanation: "Average area in the sample divided by average area in the blank. Averaging protects against accidental spikes."
         },
         {
             id: "decision",
-            title: "Final decision",
-            short: "Artifact or Real Compound",
-            tone: "green"
+            title: "Classification",
+            short: "Artifact / Real Compound",
+            tone: "green",
+            summary: "If a matching blank is found and the sample signal doesn't exceed the background sufficiently (S/B threshold), it is rejected as an artifact.",
+            deepDive: "This binary split is the key business outcome. It allows the chemist to focus only on real, clean compounds while discarding contamination.",
+            input: ["Signal-to-Blank (S/B) ratio", "Decision threshold"],
+            action: ["Compare S/B ratio against threshold"],
+            output: ["Decision: Artifact or Real Compound"],
+            formula: "Status = (Ratio < Threshold) ? \"Artifact\" : \"Real Compound\"",
+            formulaExplanation: "If the sample signal doesn't stand out strongly enough against the blank, we classify it as an Artifact."
         },
         {
             id: "output",
-            title: "Audit-ready output",
-            short: "Metrics + Why trail",
-            tone: "rose"
+            title: "Summary & Audit Trail",
+            short: "Regulatory trail",
+            tone: "rose",
+            summary: "Every step leading to the final conclusion, along with summary statistical metrics, is saved for regulatory control.",
+            deepDive: "The detailed decision log is stored as JSON. Mean RT, m/z, area, variability (CV%), and the confidence scoring bonuses/penalties are computed.",
+            input: ["Confirmed clusters with status"],
+            action: ["Compute CV% and averages", "Calculate confidence score", "Serialize decision trail"],
+            output: ["Summary table (Audit-ready Excel)"],
+            formula: "Score = 100 \u2212 \u03a3(Penalties) + Bonus",
+            formulaExplanation: "A reliability rating from 0 to 100. Deductions for mass/RT shifts and replicate variance; bonus for perfect blank separation."
         }
     ];
 
-    // ---------------------------------------------------------------------------
-    // Walkthrough Steps — Interactive stepper content
-    // ---------------------------------------------------------------------------
-    const walkthroughSteps = [
-        {
-            title: "1. Input Excel data",
-            summary:
-                "The application loads the Excel workbook and automatically selects the sheet that best matches the required columns.",
-            input: ["Workbook", "One or more sheets"],
-            action: ["Detect required headers", "Choose the best matching sheet"],
-            output: ["Structured LC-MS peak rows"],
-            highlight: "The user does not need to manually pick the correct sheet in a typical case."
-        },
-        {
-            title: "2. Validate rows",
-            summary:
-                "Rows without RT, Base Peak, or Area are removed because they cannot be screened reliably.",
-            input: ["Peak rows from Excel"],
-            action: ["Check RT", "Check Base Peak", "Check Area"],
-            output: ["Only usable rows remain"],
-            highlight: "This step removes incomplete data before any scientific decision is made."
-        },
-        {
-            title: "3. Assign row roles",
-            summary:
-                "Each row is classified as sample or blank. Operator color marks have priority over file-name heuristics.",
-            input: ["Valid rows", "Excel cell colors", "File names"],
-            action: ["Read operator mark", "Fallback to file name logic if needed"],
-            output: ["Sample / Blank / Replicate assignment"],
-            highlight: "Explicit operator marks override assumptions from file naming."
-        },
-        {
-            title: "4. Confirm peaks across replicates",
-            summary:
-                "A signal becomes more trustworthy when it appears in more than one replicate within configured RT and m/z tolerance.",
-            input: ["Rows grouped by polarity and replicate"],
-            action: ["Compare RT", "Compare m/z", "Apply one-peak-per-bucket rule"],
-            output: ["Confirmed replicate cluster"],
-            highlight: "The system checks that the same compound is seen repeatedly, not just once."
-        },
-        {
-            title: "5. Compare with blank",
-            summary:
-                "Each confirmed sample peak is compared against blank peaks of the same polarity to detect background or contamination.",
-            input: ["Confirmed sample cluster", "Blank peaks"],
-            action: ["Find blank match", "Calculate signal-to-blank ratio"],
-            output: ["Blank-associated or clean signal"],
-            highlight: "This is the main protection against false positives caused by background signal."
-        },
-        {
-            title: "6. Final decision",
-            summary:
-                "If the blank signal is too strong relative to the sample signal, the result is marked as Artifact. Otherwise it is a Real Compound.",
-            input: ["Signal-to-Blank ratio", "Decision threshold"],
-            action: ["Compare ratio against threshold"],
-            output: ["Artifact or Real Compound"],
-            highlight: "This is the business outcome that most non-technical users care about."
-        },
-        {
-            title: "7. Audit-ready output",
-            summary:
-                "The application computes final metrics and stores the decision explanation in the Why field for review and audit.",
-            input: ["Confirmed decision"],
-            action: ["Compute means", "Compute CV%", "Write Why trail"],
-            output: ["Final result table"],
-            highlight: "Every important result can be explained later."
-        }
+    // ── Reference data (tables, lists) ──────────────────────────────────
+    const columns = [
+        { col: "RT",        type: "number", desc: "Retention time of the chromatographic peak",              ex: "2.345" },
+        { col: "Base Peak", type: "number", desc: "m/z of the dominant ion in the mass spectrum",            ex: "195.08" },
+        { col: "Polarity",  type: "string", desc: "Ionization polarity: positive / negative",                ex: "positive" },
+        { col: "File",      type: "string", desc: "Source file name used to assign replicate buckets",       ex: "1_pos.d" },
+        { col: "Area",      type: "number", desc: "Peak area proportional to analyte abundance",             ex: "1250000" },
+        { col: "Label",     type: "string", desc: "(Optional) operator label or compound name",              ex: "Caffeine" },
     ];
 
-    // ---------------------------------------------------------------------------
-    // Decision Cards — Condition → Result rules
-    // ---------------------------------------------------------------------------
-    const decisionCards = [
-        {
-            title: "Missing required peak values",
-            condition: "RT, Base Peak, or Area is missing",
-            result: "Discard row",
-            kind: "bad"
-        },
-        {
-            title: "Operator mark is present",
-            condition: "Excel color code matches a known operator mark",
-            result: "Use explicit role from mark",
-            kind: "info"
-        },
-        {
-            title: "No operator mark",
-            condition: "No known color mark is present",
-            result: "Use file-name fallback logic",
-            kind: "info"
-        },
-        {
-            title: "Replicate confirmation failed",
-            condition: "RT or m/z is outside replicate tolerance",
-            result: "Peak is not confirmed",
-            kind: "bad"
-        },
-        {
-            title: "Blank match found and ratio too low",
-            condition: "Blank match exists and S/B is below threshold",
-            result: "Artifact",
-            kind: "bad"
-        },
-        {
-            title: "No blank problem",
-            condition: "No blank match or acceptable S/B ratio",
-            result: "Real Compound",
-            kind: "good"
-        }
+    const operatorMarks = [
+        { name: "sample_rep1",     color: "#ff00ff", label: "Sample, Replicate 1" },
+        { name: "sample_rep2",     color: "#ffff00", label: "Sample, Replicate 2" },
+        { name: "blank_positive",  color: "#00ffff", label: "Blank" },
+        { name: "blank_negative",  color: "#00ff00", label: "Blank" },
     ];
 
-    // ---------------------------------------------------------------------------
-    // Typical Example — Concrete walkthrough of one peak
-    // ---------------------------------------------------------------------------
-    const typicalExample = {
-        samplePeak: {
-            rt: 2.35,
-            mz: 195.08,
-            area: 1250000,
-            polarity: "positive",
-            file: "1_pos.d"
-        },
-        replicateMatch: {
-            rt: 2.36,
-            mz: 195.09,
-            area: 1180000,
-            polarity: "positive",
-            file: "2_pos.d"
-        },
-        blankPeak: {
-            rt: 2.34,
-            mz: 195.07,
-            area: 85000,
-            polarity: "positive",
-            file: "blank_pos.d"
-        },
-        results: {
-            rtMean: 2.355,
-            mzMean: 195.085,
-            areaMean: 1215000,
-            cvPct: 4.1,
-            signalToBlank: 14.3,
-            status: "Real Compound" as const
+    const outputFields = [
+        { field: "RT_mean",            desc: "Mean RT of the confirmed cluster (across all replicates)." },
+        { field: "MZ_mean",            desc: "Mean m/z of the confirmed cluster." },
+        { field: "Area_mean",          desc: "Mean peak area (no integer truncation)." },
+        { field: "AreaCVPct",          desc: "CV% across replicate areas of the cluster (sample std)." },
+        { field: "ReplicateQuality",   desc: "High (CV% \u2264 15) / Moderate (\u2264 30) / Low (> 30) \u2014 reproducibility band." },
+        { field: "SignalToBlankRatio", desc: "S/B ratio for the closest confirmed blank peak." },
+        { field: "ConfidenceScore",    desc: "Final 0\u2013100 confidence score after blank subtraction." },
+        { field: "Status",             desc: "Real Compound or Artifact classification result." },
+        { field: "Why",                desc: "JSON object with the full decision audit trail (RT/mz deltas, CV, S/B, thresholds)." },
+    ];
+
+    const params = [
+        { name: "replicate_rt_tol",   def: "0.1",  unit: "min",     used: "Replicate clustering" },
+        { name: "replicate_mz_tol",   def: "0.3",  unit: "Da / ppm", used: "Replicate clustering" },
+        { name: "blank_rt_tol",       def: "0.1",  unit: "min",     used: "Blank subtraction" },
+        { name: "blank_mz_tol",       def: "0.3",  unit: "Da / ppm", used: "Blank subtraction" },
+        { name: "signal_to_blank_min",def: "3.0",  unit: "ratio",   used: "Artifact / Real Compound decision" },
+        { name: "cv_high_max",        def: "15",   unit: "%",       used: "ReplicateQuality = High" },
+        { name: "cv_moderate_max",    def: "30",   unit: "%",       used: "ReplicateQuality = Moderate" },
+    ];
+
+    const glossary = [
+        { term: "RT",               def: "Retention Time \u2014 chromatographic retention time of an analyte in the column, measured in minutes." },
+        { term: "m/z",              def: "Mass-to-charge ratio \u2014 the central coordinate of a mass-spectrometric signal." },
+        { term: "CV%",              def: "Coefficient of Variation \u2014 relative variability between replicate peak areas. CV% = (sample std / mean) \u00d7 100. For n=2: std = |v\u2081\u2212v\u2082|/\u221a2. Lower CV = better reproducibility." },
+        { term: "S/B",              def: "Signal-to-Blank ratio \u2014 sample peak area divided by the area of the closest confirmed blank peak." },
+        { term: "Blank",            def: "A blank sample (solvent only, no analyte) used to identify background artifacts and contamination." },
+        { term: "Replicate",        def: "An independent repeat measurement of the same sample. At least 2 replicate buckets are required to confirm a peak." },
+        { term: "Confidence score", def: "A 0\u2013100 score starting at 100, penalised by RT/m/z deviation, CV%, and S/B ratio." },
+        { term: "ppm",              def: "Parts per million \u2014 a relative m/z tolerance for high-resolution instruments." },
+        { term: "Da",               def: "Dalton \u2014 an absolute m/z tolerance in daltons." },
+        { term: "Replicate bucket", def: "All peaks from one file or one explicit operator mark. Each file/mark forms one bucket." },
+    ];
+
+    // ── State ────────────────────────────────────────────────────────────
+    let current = $state(0);
+    let tab: 'overview' | 'reference' = $state('overview');
+    let activeStep = $derived(steps[current]);
+    let contentEl: HTMLDivElement | undefined = $state();
+
+    let lastScrollTime = 0;
+    const scrollThrottle = 400;
+    const scrollEdgeThreshold = 2; // px tolerance for "at boundary" checks
+
+    function handleWheel(e: WheelEvent) {
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+        if (Math.abs(e.deltaY) <= 10) return;
+
+        // If the content area is scrollable, only navigate steps at scroll boundaries
+        if (contentEl) {
+            const { scrollTop, scrollHeight, clientHeight } = contentEl;
+            const isScrollable = scrollHeight > clientHeight + scrollEdgeThreshold;
+            const atTop = scrollTop <= scrollEdgeThreshold;
+            const atBottom = scrollTop + clientHeight >= scrollHeight - scrollEdgeThreshold;
+
+            if (isScrollable) {
+                if (e.deltaY > 0 && !atBottom) return;  // let content scroll down
+                if (e.deltaY < 0 && !atTop) return;     // let content scroll up
+            }
         }
+
+        const now = Date.now();
+        if (now - lastScrollTime < scrollThrottle) return;
+
+        if (e.deltaY > 0 && current < steps.length - 1) {
+            current++;
+            lastScrollTime = now;
+            e.preventDefault();
+            if (contentEl) contentEl.scrollTop = 0;
+        } else if (e.deltaY < 0 && current > 0) {
+            current--;
+            lastScrollTime = now;
+            e.preventDefault();
+            if (contentEl) contentEl.scrollTop = 0;
+        }
+    }
+
+    function handleKeydown(e: KeyboardEvent) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+            if (current < steps.length - 1) { current++; e.preventDefault(); scrollContentToTop(); }
+        } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+            if (current > 0) { current--; e.preventDefault(); scrollContentToTop(); }
+        }
+    }
+
+    function scrollContentToTop() {
+        if (contentEl) contentEl.scrollTop = 0;
+    }
+
+    const toneBadge: Record<string, string> = {
+        slate:  "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300",
+        violet: "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
+        blue:   "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+        cyan:   "border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300",
+        green:  "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+        rose:   "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
     };
 
-    // ---------------------------------------------------------------------------
-    // Component State (Svelte 5 runes)
-    // ---------------------------------------------------------------------------
-    let current = $state(0);
-    let step = $derived(walkthroughSteps[current]);
-
-    // ---------------------------------------------------------------------------
-    // Navigation helpers
-    // ---------------------------------------------------------------------------
-    function next() {
-        if (current < walkthroughSteps.length - 1) current += 1;
-    }
-
-    function prev() {
-        if (current > 0) current -= 1;
-    }
-
-    function jumpTo(index: number) {
-        current = index;
-    }
-
-    // ---------------------------------------------------------------------------
-    // Style helpers
-    // ---------------------------------------------------------------------------
-    function toneClasses(tone: string) {
-        switch (tone) {
-            case "amber":
-                return "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200";
-            case "violet":
-                return "border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-200";
-            case "blue":
-                return "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200";
-            case "cyan":
-                return "border-cyan-200 bg-cyan-50 text-cyan-900 dark:border-cyan-900 dark:bg-cyan-950 dark:text-cyan-200";
-            case "green":
-                return "border-green-200 bg-green-50 text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-200";
-            case "rose":
-                return "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200";
-            default:
-                return "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200";
-        }
-    }
-
-    function cardClasses(kind: string) {
-        switch (kind) {
-            case "good":
-                return "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950";
-            case "bad":
-                return "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950";
-            default:
-                return "border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950";
-        }
-    }
-
-    function badgeClasses(kind: string) {
-        switch (kind) {
-            case "good":
-                return "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200";
-            case "bad":
-                return "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200";
-            default:
-                return "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200";
-        }
-    }
+    const toneDot: Record<string, string> = {
+        slate:  "border-slate-400 bg-slate-400",
+        violet: "border-violet-500 bg-violet-500",
+        blue:   "border-blue-500 bg-blue-500",
+        cyan:   "border-cyan-500 bg-cyan-500",
+        green:  "border-emerald-500 bg-emerald-500",
+        rose:   "border-rose-500 bg-rose-500",
+    };
 </script>
 
-<!-- ======================================================================= -->
-<!-- In one sentence                                                         -->
-<!-- ======================================================================= -->
-<section class="mb-8 rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-6 shadow-sm dark:border-blue-900 dark:from-blue-950 dark:to-indigo-950">
-    <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-900/60 dark:text-blue-300">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4" />
-                <path d="M12 8h.01" />
-            </svg>
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<div
+    onwheel={handleWheel}
+    onkeydown={handleKeydown}
+    tabindex="0"
+    class="flex h-[calc(100dvh-10rem)] min-h-[520px] max-h-[800px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/40 focus:outline-none dark:border-slate-700/60 dark:bg-slate-900/80 dark:shadow-none"
+>
+    <!-- ================================================================= -->
+    <!-- LEFT: Vertical Stepper Nav                                        -->
+    <!-- ================================================================= -->
+    <nav class="flex w-52 shrink-0 flex-col border-r border-slate-100 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/60">
+        <div class="px-4 pt-5 pb-2">
+            <h2 class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">Pipeline</h2>
         </div>
-        <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-500 dark:text-blue-400">
-                In one sentence
-            </p>
-            <p class="mt-2 text-base leading-8 text-blue-900 dark:text-blue-100">
-                The system reads raw LC-MS peaks from Excel, validates them, confirms each signal across replicates,
-                compares it against the blank, and labels the result as <strong>Real Compound</strong> or
-                <strong>Artifact</strong> — with a full audit trail explaining why.
-            </p>
-        </div>
-    </div>
-</section>
 
-<!-- ======================================================================= -->
-<!-- Flow Diagram — Horizontal step cards connected by arrows                -->
-<!-- ======================================================================= -->
-<section class="mb-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-    <div class="mb-6">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Simple visual overview
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            How the screening works
-        </h2>
-        <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-400">
-            The system takes raw LC-MS peaks from Excel, removes incomplete rows, confirms signals across replicates,
-            checks them against the blank, and then produces a final result with an explanation.
-        </p>
-    </div>
+        <div class="flex-1 overflow-y-auto px-4 pb-4">
+            <div class="relative">
+                <div class="absolute left-[11px] top-[14px] bottom-[14px] w-px bg-slate-200 dark:bg-slate-700"></div>
+                <div
+                    class="absolute left-[11px] top-[14px] w-px bg-blue-500 transition-all duration-500 ease-out"
+                    style="height: {steps.length > 1 ? (current / (steps.length - 1)) * 100 : 0}%"
+                ></div>
 
-    <div class="overflow-x-auto pb-2">
-        <div class="flex min-w-[980px] items-stretch gap-3">
-            {#each flowSteps as item, i}
-                <div class="flex w-[170px] shrink-0 flex-col rounded-2xl border p-4 {toneClasses(item.tone)}">
-                    <div class="mb-3 flex items-center justify-between">
-                        <span class="text-xs font-semibold uppercase tracking-wide opacity-70">
-                            Step {i + 1}
-                        </span>
-                        <span class="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold dark:bg-black/20">
-                            {item.id}
-                        </span>
-                    </div>
-
-                    <p class="text-sm font-semibold">{item.title}</p>
-                    <p class="mt-2 text-xs leading-6 opacity-80">{item.short}</p>
-                </div>
-
-                {#if i < flowSteps.length - 1}
-                    <div class="flex shrink-0 items-center justify-center px-1 text-slate-300 dark:text-slate-600">
-                        <svg width="32" height="24" viewBox="0 0 32 24" fill="none" aria-hidden="true">
-                            <path d="M2 12H26" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-                            <path d="M20 6L26 12L20 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                    </div>
-                {/if}
-            {/each}
-        </div>
-    </div>
-</section>
-
-<!-- ======================================================================= -->
-<!-- Interactive Walkthrough — Step-by-step stepper                          -->
-<!-- ======================================================================= -->
-<section class="mb-10">
-    <div class="mb-4">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Interactive walkthrough
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            Step-by-step explanation
-        </h2>
-    </div>
-
-    <!-- Progress bar -->
-    <div class="mb-6 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-        <div
-            class="h-full rounded-full bg-blue-600 transition-all duration-300"
-            style="width:{((current + 1) / walkthroughSteps.length) * 100}%"
-        ></div>
-    </div>
-
-    <div class="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <!-- Main content panel -->
-        <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <div class="flex flex-wrap items-center gap-3">
-                <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-800 dark:bg-blue-950 dark:text-blue-200">
-                    Current step
-                </span>
-                <p class="text-sm font-semibold text-slate-500 dark:text-slate-400">
-                    {step.title}
-                </p>
-            </div>
-
-            <p class="mt-5 text-base leading-8 text-slate-700 dark:text-slate-300">
-                {step.summary}
-            </p>
-
-            <div class="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                <p class="text-xs font-semibold uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">
-                    Why this matters
-                </p>
-                <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">
-                    {step.highlight}
-                </p>
-            </div>
-
-            <div class="mt-6 grid gap-4 md:grid-cols-3">
-                <!-- Input column -->
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Input
-                    </p>
-                    <div class="mt-3 space-y-2">
-                        {#each step.input as item}
-                            <div class="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-
-                <!-- Action column -->
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        What the system does
-                    </p>
-                    <div class="mt-3 space-y-2">
-                        {#each step.action as item}
-                            <div class="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-
-                <!-- Output column -->
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Output
-                    </p>
-                    <div class="mt-3 space-y-2">
-                        {#each step.output as item}
-                            <div class="rounded-xl bg-white px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {item}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Sidebar navigation -->
-        <aside class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                Navigate steps
-            </p>
-
-            <div class="mt-4 space-y-3">
-                {#each walkthroughSteps as s, i}
+                {#each steps as st, i}
                     <button
-                        class="w-full rounded-2xl border px-4 py-3 text-left transition {i === current
-                            ? 'border-blue-500 bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950 dark:text-blue-200'
-                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400'}"
-                        onclick={() => jumpTo(i)}
+                        onclick={() => (current = i)}
+                        class="group relative flex w-full items-start gap-3 py-2.5 text-left transition-colors"
                     >
-                        <span class="block text-sm font-semibold">{s.title}</span>
+                        <div class="relative z-10 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300
+                            {current === i
+                                ? `${toneDot[st.tone] ?? 'border-blue-500 bg-blue-500'} text-white shadow-md scale-110`
+                                : i < current
+                                    ? 'border-blue-400 bg-blue-50 text-blue-600 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-400'
+                                    : 'border-slate-300 bg-white text-slate-400 group-hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-500'
+                            }">
+                            <span class="text-[9px] font-bold">{i + 1}</span>
+                        </div>
+                        <div class="min-w-0 pt-px">
+                            <p class="truncate text-[11px] font-semibold leading-tight transition-colors
+                                {current === i ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300'}">
+                                {st.title}
+                            </p>
+                            <p class="mt-0.5 truncate text-[10px] text-slate-400 dark:text-slate-500">{st.short}</p>
+                        </div>
                     </button>
                 {/each}
             </div>
+        </div>
 
-            <div class="mt-6 flex gap-3">
-                <button
-                    onclick={prev}
-                    disabled={current === 0}
-                    class="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300"
-                >
-                    Previous
-                </button>
+        <div class="shrink-0 border-t border-slate-100 px-4 py-2.5 dark:border-slate-800">
+            <p class="text-center text-[10px] text-slate-400 dark:text-slate-500">
+                <kbd class="rounded border border-slate-200 bg-white px-1 py-0.5 font-mono text-[9px] dark:border-slate-700 dark:bg-slate-800">&uarr;</kbd>
+                <kbd class="rounded border border-slate-200 bg-white px-1 py-0.5 font-mono text-[9px] dark:border-slate-700 dark:bg-slate-800">&darr;</kbd>
+                or scroll
+            </p>
+        </div>
+    </nav>
 
-                <button
-                    onclick={next}
-                    disabled={current === walkthroughSteps.length - 1}
-                    class="rounded-2xl bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-40"
-                >
-                    Next
-                </button>
-            </div>
-        </aside>
-    </div>
-</section>
+    <!-- ================================================================= -->
+    <!-- RIGHT: Content Panel                                              -->
+    <!-- ================================================================= -->
+    <div class="flex flex-1 flex-col min-w-0">
+        <!-- Progress bar -->
+        <div class="h-1 shrink-0 bg-slate-100 dark:bg-slate-800">
+            <div class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out" style="width: {((current + 1) / steps.length) * 100}%"></div>
+        </div>
 
-<!-- ======================================================================= -->
-<!-- Decision Logic Cards                                                    -->
-<!-- ======================================================================= -->
-<section class="mb-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-    <div class="mb-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Decision logic
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            Why a result becomes Artifact or Real Compound
-        </h2>
-    </div>
+        <!-- Tab switcher -->
+        <div class="shrink-0 flex items-center gap-1 border-b border-slate-100 px-5 pt-3 pb-0 dark:border-slate-800">
+            <button
+                onclick={() => (tab = 'overview')}
+                class="rounded-t-lg px-3 py-1.5 text-xs font-semibold transition-colors
+                    {tab === 'overview'
+                        ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'}"
+            >
+                Overview
+            </button>
+            <button
+                onclick={() => (tab = 'reference')}
+                class="rounded-t-lg px-3 py-1.5 text-xs font-semibold transition-colors
+                    {tab === 'reference'
+                        ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'}"
+            >
+                Reference
+            </button>
+        </div>
 
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {#each decisionCards as card}
-            <div class="rounded-2xl border p-4 {cardClasses(card.kind)}">
-                <div class="flex items-center justify-between gap-3">
-                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {card.title}
-                    </p>
-                    <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide {badgeClasses(card.kind)}">
-                        {card.kind}
+        <!-- Content area -->
+        <div bind:this={contentEl} class="flex-1 overflow-y-auto p-5 lg:p-6">
+            {#key `${current}-${tab}`}
+            <div in:fade={{ duration: 200, easing: cubicOut }}>
+
+                <!-- Header (shared) -->
+                <div class="mb-3 flex items-center gap-3">
+                    <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest {toneBadge[activeStep.tone] ?? toneBadge.slate}">
+                        {activeStep.id}
                     </span>
+                    <h3 class="text-lg font-extrabold tracking-tight text-slate-900 lg:text-xl dark:text-white">
+                        {activeStep.title}
+                    </h3>
                 </div>
 
-                <div class="mt-4 space-y-3">
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                            Condition
-                        </p>
-                        <p class="mt-1 text-sm leading-7 text-slate-700 dark:text-slate-300">
-                            {card.condition}
-                        </p>
+                <!-- ====================================================== -->
+                <!-- TAB: Overview                                           -->
+                <!-- ====================================================== -->
+                {#if tab === 'overview'}
+                    <p class="mb-4 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                        {activeStep.summary}
+                    </p>
+
+                    <!-- I/O Grid -->
+                    <div class="mb-4 grid grid-cols-3 gap-2.5">
+                        <div class="rounded-xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/30">
+                            <p class="mb-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Input</p>
+                            <ul class="space-y-1">
+                                {#each activeStep.input as item}
+                                    <li class="flex items-start gap-1.5 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+                                        <span class="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+                                        {item}
+                                    </li>
+                                {/each}
+                            </ul>
+                        </div>
+                        <div class="rounded-xl border-l-2 border-blue-400 bg-blue-50/40 p-3 dark:bg-blue-900/10">
+                            <p class="mb-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500 dark:text-blue-400">Process</p>
+                            <ul class="space-y-1">
+                                {#each activeStep.action as item}
+                                    <li class="flex items-start gap-1.5 text-[11px] font-medium leading-snug text-slate-700 dark:text-slate-200">
+                                        <svg class="mt-0.5 h-3 w-3 shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                                        {item}
+                                    </li>
+                                {/each}
+                            </ul>
+                        </div>
+                        <div class="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 dark:border-emerald-900/30 dark:bg-emerald-900/10">
+                            <p class="mb-1.5 text-[9px] font-bold uppercase tracking-widest text-emerald-500 dark:text-emerald-400">Output</p>
+                            <ul class="space-y-1">
+                                {#each activeStep.output as item}
+                                    <li class="flex items-start gap-1.5 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+                                        <svg class="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                                        {item}
+                                    </li>
+                                {/each}
+                            </ul>
+                        </div>
                     </div>
 
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                            Result
-                        </p>
-                        <p class="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                            {card.result}
-                        </p>
+                    <!-- Detail + Math -->
+                    <div class="grid gap-2.5 lg:grid-cols-2">
+                        <div class="rounded-xl border border-slate-100 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/20">
+                            <h4 class="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                <svg class="h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                Detail
+                            </h4>
+                            <p class="text-xs leading-5 text-slate-600 dark:text-slate-400">{activeStep.deepDive}</p>
+                        </div>
+                        <div class="rounded-xl border border-indigo-100 bg-indigo-50/30 p-4 dark:border-indigo-900/30 dark:bg-indigo-900/10">
+                            <h4 class="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Math & Logic</h4>
+                            <p class="mb-1.5 font-mono text-sm font-bold leading-snug text-slate-900 dark:text-indigo-100">{activeStep.formula}</p>
+                            <p class="text-xs leading-5 text-slate-600 dark:text-slate-400">{activeStep.formulaExplanation}</p>
+                        </div>
                     </div>
-                </div>
-            </div>
-        {/each}
-    </div>
-</section>
 
-<!-- ======================================================================= -->
-<!-- Typical Example — Concrete walkthrough of one peak                      -->
-<!-- ======================================================================= -->
-<section class="mb-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-    <div class="mb-5">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-            Typical example
-        </p>
-        <h2 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-            One peak, from raw signal to final verdict
-        </h2>
-        <p class="mt-2 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-400">
-            Below is a concrete example showing how one LC-MS peak travels through the pipeline —
-            from the initial sample measurement, through replicate confirmation and blank comparison,
-            to the final classification.
-        </p>
-    </div>
+                <!-- ====================================================== -->
+                <!-- TAB: Reference                                          -->
+                <!-- ====================================================== -->
+                {:else}
+                    <div class="space-y-5 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
 
-    <div class="grid gap-4 lg:grid-cols-3">
-        <!-- Sample peak -->
-        <div class="rounded-2xl border border-violet-200 bg-violet-50 p-5 dark:border-violet-900 dark:bg-violet-950">
-            <div class="mb-3 flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-violet-200 text-xs font-bold text-violet-800 dark:bg-violet-800 dark:text-violet-100">S</span>
-                <p class="text-sm font-semibold text-violet-900 dark:text-violet-200">Sample peak</p>
+                        <!-- Step 1: Input & Validation -->
+                        {#if activeStep.id === 'excel'}
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Input data</h4>
+                                <p>The system accepts an Excel file (.xlsx / .xls) with LC-MS peak data, automatically selects the most suitable sheet, and expects at least two replicates (separate files or operator marks) plus a blank sample.</p>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Required Excel columns</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-300">Column</th>
+                                                <th class="px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-300">Type</th>
+                                                <th class="px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-300">Description</th>
+                                                <th class="px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-300">Example</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            {#each columns as c}
+                                                <tr>
+                                                    <td class="px-3 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-400">{c.col}</td>
+                                                    <td class="px-3 py-1.5 text-slate-500 dark:text-slate-400">{c.type}</td>
+                                                    <td class="px-3 py-1.5">{c.desc}</td>
+                                                    <td class="px-3 py-1.5 font-mono text-slate-500 dark:text-slate-400">{c.ex}</td>
+                                                </tr>
+                                            {/each}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                        <!-- Step 2: Role Assignment -->
+                        {:else if activeStep.id === 'classify'}
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Operator marks</h4>
+                                <p class="mb-3">Cell color marks take priority over the file name. Without marks, type is inferred from the filename: files containing "blank" become blank; files like <span class="font-mono">1_*.d</span>, <span class="font-mono">2_*.d</span> become sample_1, sample_2, etc.</p>
+                                <div class="grid grid-cols-2 gap-2">
+                                    {#each operatorMarks as m}
+                                        <div class="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800">
+                                            <span class="h-4 w-4 shrink-0 rounded-full border border-black/10 dark:border-white/10" style="background:{m.color}"></span>
+                                            <div>
+                                                <span class="font-mono font-semibold text-slate-900 dark:text-slate-100">{m.name}</span>
+                                                <span class="ml-1.5 text-slate-400">{m.label}</span>
+                                            </div>
+                                        </div>
+                                    {/each}
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Grouping</h4>
+                                <p>After assignment, rows are grouped by <span class="font-mono font-semibold">(SampleType, Polarity)</span>. Each group is processed independently through clustering and blank subtraction.</p>
+                            </div>
+
+                        <!-- Step 3: Replicate Clustering -->
+                        {:else if activeStep.id === 'replicates'}
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Greedy replicate clustering</h4>
+                                <p>Peaks are sorted by area descending. Each peak seeds a cluster in turn. From every other bucket the closest unused peak to the current cluster centroid (RT, m/z averaged as members are added) is greedily selected. A cluster is confirmed when it spans <span class="font-semibold">&ge; 2 different buckets</span>.</p>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Inclusion rule</h4>
+                                <div class="rounded-lg border border-blue-100 bg-blue-50/50 p-3 font-mono text-[11px] dark:border-blue-900/40 dark:bg-blue-900/10">
+                                    <p>|RT_candidate &minus; RT_centroid| &le; replicate_rt_tol</p>
+                                    <p>|mz_candidate &minus; mz_centroid| &le; replicate_mz_tol (Da or ppm)</p>
+                                </div>
+                                <p class="mt-2">Ties broken by smallest distance (RT fraction + mz fraction), then largest area.</p>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Parameters</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold">Parameter</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Default</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Unit</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            {#each params.filter(p => p.used === 'Replicate clustering') as p}
+                                                <tr>
+                                                    <td class="px-3 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-400">{p.name}</td>
+                                                    <td class="px-3 py-1.5">{p.def}</td>
+                                                    <td class="px-3 py-1.5 text-slate-500">{p.unit}</td>
+                                                </tr>
+                                            {/each}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                        <!-- Step 4: Blank Subtraction -->
+                        {:else if activeStep.id === 'blank'}
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Blank subtraction</h4>
+                                <p>The blank undergoes the same clustering (step 2) independently. Each confirmed sample peak is then matched against confirmed blank peaks within <span class="font-mono">blank_rt_tol / blank_mz_tol</span>. The closest match is selected (by RT+mz distance, tie-broken by larger blank area).</p>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Classification rules</h4>
+                                <div class="space-y-1.5">
+                                    <div class="flex items-start gap-2 rounded-lg border border-rose-100 bg-rose-50/50 p-2.5 dark:border-rose-900/30 dark:bg-rose-900/10">
+                                        <span class="mt-0.5 font-mono font-bold text-rose-600 dark:text-rose-400">Artifact</span>
+                                        <span>&mdash; blank match found and S/B &lt; signal_to_blank_min (or blank area = 0)</span>
+                                    </div>
+                                    <div class="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50/50 p-2.5 dark:border-emerald-900/30 dark:bg-emerald-900/10">
+                                        <span class="mt-0.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">Real Compound</span>
+                                        <span>&mdash; no blank match, or S/B &ge; threshold</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Parameters</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold">Parameter</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Default</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Unit</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            {#each params.filter(p => p.used.includes('Blank') || p.used.includes('Artifact')) as p}
+                                                <tr>
+                                                    <td class="px-3 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-400">{p.name}</td>
+                                                    <td class="px-3 py-1.5">{p.def}</td>
+                                                    <td class="px-3 py-1.5 text-slate-500">{p.unit}</td>
+                                                </tr>
+                                            {/each}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                        <!-- Step 5: Classification / Confidence Score -->
+                        {:else if activeStep.id === 'decision'}
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Confidence Score formula</h4>
+                                <p>Starts at 100. Penalties are applied in sequence; result is clamped to [0, 100].</p>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Stage 1 &mdash; Replicates</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold">Factor</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Penalty</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            <tr><td class="px-3 py-1.5">RT proximity</td><td class="px-3 py-1.5 font-mono">&minus;(mean_RT_delta / rt_tol) &times; 20, max &minus;20</td></tr>
+                                            <tr><td class="px-3 py-1.5">m/z proximity</td><td class="px-3 py-1.5 font-mono">&minus;(mean_mz_delta / mz_tol) &times; 25, max &minus;25</td></tr>
+                                            <tr><td class="px-3 py-1.5">CV% High</td><td class="px-3 py-1.5 font-mono">0</td></tr>
+                                            <tr><td class="px-3 py-1.5">CV% Moderate</td><td class="px-3 py-1.5 font-mono">&minus;12</td></tr>
+                                            <tr><td class="px-3 py-1.5">CV% Low</td><td class="px-3 py-1.5 font-mono">&minus;(12 + (CV &minus; cv_moderate_max) &times; 0.7), max &minus;35</td></tr>
+                                            <tr><td class="px-3 py-1.5">CV% missing</td><td class="px-3 py-1.5 font-mono">&minus;10</td></tr>
+                                            <tr><td class="px-3 py-1.5">Not colour-paired</td><td class="px-3 py-1.5 font-mono">&minus;5</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Stage 2 &mdash; Blank</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold">Condition</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Adjustment</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            <tr><td class="px-3 py-1.5">No blank match</td><td class="px-3 py-1.5 font-mono text-emerald-600 dark:text-emerald-400">+3</td></tr>
+                                            <tr><td class="px-3 py-1.5">S/B &ge; threshold</td><td class="px-3 py-1.5 font-mono text-emerald-600 dark:text-emerald-400">+min(5, (S/B &minus; threshold) &times; 0.5)</td></tr>
+                                            <tr><td class="px-3 py-1.5">S/B &lt; threshold (Artifact)</td><td class="px-3 py-1.5 font-mono text-rose-600 dark:text-rose-400">&minus;(15 + deficit &times; 30), max &minus;45</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                        <!-- Step 6: Output & Audit -->
+                        {:else if activeStep.id === 'output'}
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Output fields</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold">Field</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Description</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            {#each outputFields as f}
+                                                <tr>
+                                                    <td class="px-3 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-400 whitespace-nowrap">{f.field}</td>
+                                                    <td class="px-3 py-1.5">{f.desc}</td>
+                                                </tr>
+                                            {/each}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">All parameters</h4>
+                                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <table class="w-full text-[11px]">
+                                        <thead class="bg-slate-50 dark:bg-slate-800">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold">Parameter</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Default</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Unit</th>
+                                                <th class="px-3 py-2 text-left font-semibold">Used in</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                                            {#each params as p}
+                                                <tr>
+                                                    <td class="px-3 py-1.5 font-mono font-semibold text-blue-700 dark:text-blue-400">{p.name}</td>
+                                                    <td class="px-3 py-1.5">{p.def}</td>
+                                                    <td class="px-3 py-1.5 text-slate-500">{p.unit}</td>
+                                                    <td class="px-3 py-1.5">{p.used}</td>
+                                                </tr>
+                                            {/each}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p class="mt-2 text-[10px] text-slate-400">RT/mz/S/B parameters are adjustable on the main form. cv_high_max and cv_moderate_max are currently fixed.</p>
+                            </div>
+
+                            <div>
+                                <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Glossary</h4>
+                                <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                                    {#each glossary as g}
+                                        <div class="rounded-lg border border-slate-100 bg-slate-50/50 p-2.5 dark:border-slate-800 dark:bg-slate-800/20">
+                                            <span class="font-mono font-semibold text-blue-700 dark:text-blue-400">{g.term}</span>
+                                            <p class="mt-0.5 text-[10px] leading-snug text-slate-500 dark:text-slate-400">{g.def}</p>
+                                        </div>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/if}
+                    </div>
+                {/if}
+
             </div>
-            <div class="space-y-2 text-sm">
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">RT</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.samplePeak.rt} min</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">m/z</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.samplePeak.mz}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Area</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.samplePeak.area.toLocaleString()}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">File</span>
-                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{typicalExample.samplePeak.file}</span>
-                </div>
-            </div>
+            {/key}
         </div>
 
-        <!-- Replicate match -->
-        <div class="rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950">
-            <div class="mb-3 flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-blue-200 text-xs font-bold text-blue-800 dark:bg-blue-800 dark:text-blue-100">R</span>
-                <p class="text-sm font-semibold text-blue-900 dark:text-blue-200">Replicate match</p>
-            </div>
-            <div class="space-y-2 text-sm">
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">RT</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.replicateMatch.rt} min</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">m/z</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.replicateMatch.mz}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Area</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.replicateMatch.area.toLocaleString()}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">File</span>
-                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{typicalExample.replicateMatch.file}</span>
-                </div>
-            </div>
-            <div class="mt-3 rounded-xl border border-blue-200 bg-blue-100/60 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
-                ΔRT = 0.01 min ✓ &nbsp;·&nbsp; Δm/z = 0.01 Da ✓
-            </div>
-        </div>
+        <!-- Bottom navigation -->
+        <div class="shrink-0 flex items-center justify-between border-t border-slate-100 px-5 py-2.5 dark:border-slate-800">
+            <button
+                onclick={() => current > 0 && current--}
+                class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                disabled={current === 0}
+            >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Back
+            </button>
 
-        <!-- Blank peak -->
-        <div class="rounded-2xl border border-cyan-200 bg-cyan-50 p-5 dark:border-cyan-900 dark:bg-cyan-950">
-            <div class="mb-3 flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-200 text-xs font-bold text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">B</span>
-                <p class="text-sm font-semibold text-cyan-900 dark:text-cyan-200">Blank peak</p>
+            <div class="flex items-center gap-1.5">
+                {#each steps as _, i}
+                    <button
+                        onclick={() => (current = i)}
+                        class="h-1.5 rounded-full transition-all duration-300
+                            {current === i ? 'w-5 bg-blue-500' : 'w-1.5 bg-slate-300 hover:bg-slate-400 dark:bg-slate-600 dark:hover:bg-slate-500'}"
+                        aria-label="Go to step {i + 1}"
+                    ></button>
+                {/each}
             </div>
-            <div class="space-y-2 text-sm">
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">RT</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.blankPeak.rt} min</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">m/z</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.blankPeak.mz}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">Area</span>
-                    <span class="font-mono font-semibold text-slate-800 dark:text-slate-200">{typicalExample.blankPeak.area.toLocaleString()}</span>
-                </div>
-                <div class="flex justify-between rounded-xl bg-white/70 px-3 py-2 dark:bg-black/20">
-                    <span class="text-slate-500 dark:text-slate-400">File</span>
-                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{typicalExample.blankPeak.file}</span>
-                </div>
-            </div>
-            <div class="mt-3 rounded-xl border border-cyan-200 bg-cyan-100/60 px-3 py-2 text-xs text-cyan-700 dark:border-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
-                Blank match found · S/B = {typicalExample.results.signalToBlank} ≥ 3.0 ✓
-            </div>
+
+            <button
+                onclick={() => current < steps.length - 1 && current++}
+                class="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition-transform hover:scale-105 disabled:pointer-events-none disabled:opacity-30 dark:bg-white dark:text-slate-900"
+                disabled={current === steps.length - 1}
+            >
+                Next
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
         </div>
     </div>
-
-    <!-- Final verdict -->
-    <div class="mt-5 rounded-2xl border border-green-200 bg-green-50 p-5 dark:border-green-900 dark:bg-green-950">
-        <div class="flex flex-wrap items-center gap-4">
-            <span class="rounded-full bg-green-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-green-800 dark:bg-green-900/60 dark:text-green-200">
-                {typicalExample.results.status}
-            </span>
-            <div class="flex flex-wrap gap-4 text-sm text-green-800 dark:text-green-300">
-                <span>RT<sub>mean</sub> = {typicalExample.results.rtMean}</span>
-                <span>m/z<sub>mean</sub> = {typicalExample.results.mzMean}</span>
-                <span>Area<sub>mean</sub> = {typicalExample.results.areaMean.toLocaleString()}</span>
-                <span>CV% = {typicalExample.results.cvPct}</span>
-                <span>S/B = {typicalExample.results.signalToBlank}</span>
-            </div>
-        </div>
-    </div>
-</section>
+</div>

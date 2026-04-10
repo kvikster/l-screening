@@ -266,7 +266,7 @@ function buildDashboardProps(
   const displayedPeaks = truncated ? peaks.slice(0, displayLimit) : peaks;
 
   return {
-    title: `LC-MS Screening — ${filename}`,
+    title: `${filename}`,
     summary: summary as DashboardProps["summary"],
     peaks: displayedPeaks as DashboardProps["peaks"],
     parameters: params as unknown as DashboardProps["peaks"],
