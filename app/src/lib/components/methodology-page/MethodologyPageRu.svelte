@@ -168,7 +168,7 @@
 
         <!-- Раздел 5: Выходные поля -->
         <section id="output" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">4. Выходные поля</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">5. Выходные поля</h2>
             <div class="space-y-3">
                 {#each outputFields as field}
                     <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -181,7 +181,7 @@
 
         <!-- Раздел 6: Параметры толерантности -->
         <section id="params" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">5. Параметры толерантности</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">6. Параметры толерантности</h2>
             <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                 <table class="w-full text-sm">
                     <thead class="bg-slate-50 dark:bg-slate-700">
@@ -208,7 +208,7 @@
 
         <!-- Раздел 7: Глоссарий -->
         <section id="glossary" class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">6. Глоссарий</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">7. Глоссарий</h2>
             <div class="grid gap-3 sm:grid-cols-2">
                 {#each glossary as item}
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
@@ -221,7 +221,7 @@
 
         <!-- Раздел 8: Ссылки -->
         <section id="references" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">7. Ссылки</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">8. Ссылки</h2>
             <p class="mb-4 text-sm leading-7 text-slate-600 dark:text-slate-400">Базовая терминология и регуляторный контекст, на которые опирается эта методика.</p>
             <div class="space-y-3">
                 {#each refs as ref}

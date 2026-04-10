@@ -78,7 +78,7 @@ export const ruMessages = {
     noValidRows: "В загруженном файле не найдено валидных строк данных.",
     noValidSheet: "Не найден валидный лист с данными. Обязательные колонки: {columns}",
     htmlSummary: "Сводка",
-    htmlScreenedPeaks: "Проскринированные пики",
+    htmlScreenedPeaks: "Пики",
     htmlSample: "Образец",
     htmlTotal: "Всего",
     htmlConfirmed: "Подтверждено",
@@ -113,7 +113,7 @@ export const ruMessages = {
     blankSubtraction: "Вычитание blank",
     signalToBlankThreshold: "Порог signal-to-blank",
     replicateQualityBands: "Пороги качества репликатов",
-    screenedPeaks: "Проскринированные пики",
+    screenedPeaks: "Пики",
     screenedPeaksDesc:
         "QC-метрики на уровне пика с вычитанием blank и аудиторским следом репликатов.",
     status: "Статус",

@@ -78,7 +78,7 @@ export const ukMessages = {
     noValidRows: "У завантаженому файлі не знайдено валідних рядків даних.",
     noValidSheet: "Не знайдено валідний лист з даними. Обов'язкові колонки: {columns}",
     htmlSummary: "Зведення",
-    htmlScreenedPeaks: "Проскринені піки",
+    htmlScreenedPeaks: "Піки",
     htmlSample: "Зразок",
     htmlTotal: "Всього",
     htmlConfirmed: "Підтверджено",
@@ -113,7 +113,7 @@ export const ukMessages = {
     blankSubtraction: "Віднімання blank",
     signalToBlankThreshold: "Поріг signal-to-blank",
     replicateQualityBands: "Пороги якості реплікатів",
-    screenedPeaks: "Проскринені піки",
+    screenedPeaks: "Піки",
     screenedPeaksDesc:
         "QC-метрики на рівні піка з відніманням blank та аудиторським слідом реплікатів.",
     status: "Статус",

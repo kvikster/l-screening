@@ -645,8 +645,8 @@
         </svg>
       </button>
     </div>
-    <div class="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-      <div class="mx-auto max-w-4xl">
+    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8">
+      <div class="mx-auto w-full max-w-[68rem]">
         <MethodologyPanel />
       </div>
     </div>

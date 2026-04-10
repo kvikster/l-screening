@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { get } from "svelte/store";
   import DataTable from "datatables.net";
   import "datatables.net-dt/css/dataTables.dataTables.css";
   import { dictionary, getReplicateQualityLabel, getStatusLabel, getSampleTypeLabel } from "$lib/i18n";
 
-  let { peaks, parameters, onAuditClick, showFilters = true } = $props<{
+  let { peaks, parameters, onAuditClick, onVisiblePeaksChange = () => {}, showFilters = true, selectedPeakKey = null } = $props<{
     peaks: any[];
     parameters?: any;
     onAuditClick: (peak: any) => void;
+    onVisiblePeaksChange?: (peaks: any[]) => void;
     showFilters?: boolean;
+    selectedPeakKey?: string | null;
   }>();
 
   let tableEl: HTMLTableElement;
@@ -127,6 +129,17 @@
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,
     });
+  }
+
+  function peakKey(peak: any): string {
+    if (!peak) return "";
+    return [
+      String(peak.SampleType || ""),
+      String(peak.Polarity || ""),
+      Number(peak.RT_mean ?? 0).toFixed(6),
+      Number(peak.MZ_mean ?? 0).toFixed(6),
+      Number(peak.Area_mean ?? 0).toFixed(2),
+    ].join("|");
   }
 
   function qualityBadge(q: string): string {
@@ -267,14 +280,53 @@
         data: "Status",
         render: (d: any) => statusBadge(d),
       },
-      {
-        title: dict.audit,
-        data: null,
-        orderable: false,
-        render: (_d: any, _t: any, _row: any, meta: any) =>
-          `<button class="dt-audit-btn inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" data-row="${meta.row}" title="${dict.logicDetail}" aria-label="${dict.logicDetail}"><svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>`,
-      },
     ];
+  }
+
+  function syncVisiblePeaks() {
+    if (!dt) {
+      onVisiblePeaksChange([]);
+      return;
+    }
+    const visibleRows = dt.rows({ search: "applied", order: "applied" }).data().toArray();
+    onVisiblePeaksChange(visibleRows);
+  }
+
+  function updateSelectedRowClasses() {
+    if (!dt) return;
+    const body = tableEl.tBodies.item(0);
+    if (!body) return;
+
+    body.querySelectorAll("tr").forEach((row) => {
+      if (row.classList.contains("dt-group-row")) return;
+      const rowData = dt.row(row as HTMLTableRowElement).data();
+      row.classList.toggle("dt-row-selected", peakKey(rowData) === (selectedPeakKey ?? ""));
+    });
+  }
+
+  async function revealSelectedPeak() {
+    if (!dt || !selectedPeakKey) return;
+    const orderedRows = dt.rows({ search: "applied", order: "applied" }).data().toArray();
+    const selectedIndex = orderedRows.findIndex((row: any) => peakKey(row) === selectedPeakKey);
+    if (selectedIndex < 0) return;
+
+    const pageLength = Number(dt.page.len?.() ?? 25);
+    const targetPage = Math.floor(selectedIndex / Math.max(pageLength, 1));
+    const currentPage = Number(dt.page.info().page ?? 0);
+
+    if (targetPage !== currentPage) {
+      dt.page(targetPage).draw(false);
+      await tick();
+    } else {
+      updateSelectedRowClasses();
+      await tick();
+    }
+
+    requestAnimationFrame(() => {
+      updateSelectedRowClasses();
+      const selectedRow = tableEl.tBodies.item(0)?.querySelector("tr.dt-row-selected") as HTMLTableRowElement | null;
+      selectedRow?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
   }
 
   function initDT() {
@@ -301,8 +353,10 @@
       createdRow: (row: HTMLTableRowElement, rowData: any) => {
         row.classList.toggle("dt-row-artifact", rowData.Status !== "Real Compound");
         row.classList.toggle("dt-row-low-confidence", Number(rowData.ConfidenceScore ?? -Infinity) < confidenceMin);
+        row.classList.toggle("dt-row-selected", peakKey(rowData) === (selectedPeakKey ?? ""));
       },
       drawCallback: () => {
+        syncVisiblePeaks();
         if (!dt || grouping === "none") return;
         tableEl.tBodies.item(0)?.querySelectorAll("tr.dt-group-row").forEach((row) => row.remove());
         const rows = dt.rows({ page: "current" }).nodes();
@@ -324,7 +378,7 @@
             isCollapsed = collapsedGroups.has(group);
             const header = document.createElement("tr");
             header.className = "dt-group-row";
-            header.innerHTML = `<td colspan="10"><button type="button" class="dt-group-toggle" data-group="${group}" aria-expanded="${isCollapsed ? "false" : "true"}"><span class="dt-group-caret">${isCollapsed ? "▸" : "▾"}</span><span class="dt-group-label">${group}</span><span class="dt-group-count">${counts.get(group) || 0}</span></button></td>`;
+            header.innerHTML = `<td colspan="9"><button type="button" class="dt-group-toggle" data-group="${group}" aria-expanded="${isCollapsed ? "false" : "true"}"><span class="dt-group-caret">${isCollapsed ? "▸" : "▾"}</span><span class="dt-group-label">${group}</span><span class="dt-group-count">${counts.get(group) || 0}</span></button></td>`;
             node.parentNode?.insertBefore(header, node);
             previous = group;
           }
@@ -334,6 +388,8 @@
       },
       columns: buildColumns(),
     });
+    syncVisiblePeaks();
+    void revealSelectedPeak();
   }
 
   function resetDefaults() {
@@ -368,14 +424,6 @@
         return;
       }
 
-      const btn = (e.target as HTMLElement).closest(".dt-audit-btn") as HTMLElement | null;
-      if (btn) {
-        const rowIdx = Number(btn.dataset.row);
-        const rowData = dt?.row(rowIdx).data();
-        if (rowData) onAuditClick(rowData);
-        return;
-      }
-
       const tr = (e.target as HTMLElement).closest("tbody tr") as HTMLTableRowElement | null;
       if (!tr || tr.classList.contains("dt-group-row")) return;
       const clickedRow = dt?.row(tr).data();
@@ -383,6 +431,7 @@
     });
 
     return () => {
+      onVisiblePeaksChange([]);
       dt?.destroy();
       dt = null;
     };
@@ -402,22 +451,39 @@
     const query = searchQuery;
     dt?.search(query).draw();
   });
+
+  $effect(() => {
+    const key = selectedPeakKey;
+    if (!dt) return;
+    void revealSelectedPeak();
+  });
 </script>
 
-<div class="flex h-full min-h-0 flex-col">
-  <div class="group relative z-30 mb-0 shrink-0 rounded-xl border border-slate-200 bg-white transition-all hover:rounded-b-none hover:shadow-lg dark:border-slate-700 dark:bg-slate-800/80">
-    
+<div class="flex h-full min-h-0 flex-col overflow-x-hidden">
+  <div class="group relative z-30 mb-0 shrink-0 overflow-x-clip rounded-xl border border-slate-200 bg-white transition-all hover:rounded-b-none hover:shadow-lg dark:border-slate-700 dark:bg-slate-800/80">
+
     <!-- ROW 1 (Always Visible): Title, Search, Primary Filters -->
-    <div class="flex flex-wrap items-center justify-between gap-4 px-4 py-2.5">
-      
-      <!-- Informational Text -->
-      <div>
-        <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">{get(dictionary).screenedPeaks}</h3>
-        <p class="text-[11px] text-slate-500 dark:text-slate-400">{get(dictionary).screenedPeaksDesc}</p>
+    <div class="flex flex-wrap items-center gap-x-1.5 gap-y-3 px-4 py-2.5">
+
+      <div class="relative shrink-0">
+        <div class="flex items-center gap-1.5">
+          <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">{get(dictionary).screenedPeaks}</h3>
+          <button
+            type="button"
+            class="peer inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition-colors hover:border-blue-300 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:border-blue-500 dark:hover:text-blue-300"
+            aria-label={get(dictionary).screenedPeaksDesc}
+            title={get(dictionary).screenedPeaksDesc}
+          >
+            <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 10v6"/><path d="M12 7h.01"/></svg>
+          </button>
+        </div>
+        <div class="pointer-events-none absolute bottom-full left-0 z-20 mb-2 hidden w-72 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600 shadow-xl peer-hover:block peer-focus:block dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          {get(dictionary).screenedPeaksDesc}
+        </div>
       </div>
 
       <!-- Persistent Controls -->
-      <div class="flex items-center gap-3">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         <!-- Search -->
         <div class="relative w-48 transition-all group-hover:w-56">
           <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -450,7 +516,7 @@
     </div>
 
     <!-- ROW 2 (Hover Expansion): Advanced Filters -->
-    <div class="absolute left-[-1px] right-[-1px] top-full hidden rounded-b-xl border-x border-b border-slate-200 bg-white pb-3 shadow-2xl group-hover:block dark:border-slate-700 dark:bg-slate-800/95">
+    <div class="absolute left-[-1px] right-[-1px] top-full hidden overflow-x-hidden rounded-b-xl border-x border-b border-slate-200 bg-white pb-3 shadow-2xl group-hover:block dark:border-slate-700 dark:bg-slate-800/95">
       <div class="mx-4 mb-2 border-t border-slate-100 dark:border-slate-700/50"></div>
       <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4">
         
@@ -531,7 +597,8 @@
     justify-content: stretch;
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     margin: 0;
     padding: 0;
   }
@@ -812,6 +879,11 @@
     box-shadow: inset 3px 0 0 #f59e0b;
   }
 
+  :global(.peaks-dt table.dataTable tbody tr.dt-row-selected) {
+    box-shadow: inset 4px 0 0 #2563eb;
+    background: linear-gradient(90deg, rgba(219, 234, 254, 0.85) 0%, rgba(255, 255, 255, 0.92) 38%, rgba(255, 255, 255, 0.98) 100%);
+  }
+
   :global(.peaks-dt table.dataTable tbody tr.dt-group-row) {
     background: #f1f5f9;
   }
@@ -881,6 +953,11 @@
 
   :global(.dark .peaks-dt table.dataTable tbody tr.dt-row-artifact) {
     background: rgba(127, 29, 29, 0.22);
+  }
+
+  :global(.dark .peaks-dt table.dataTable tbody tr.dt-row-selected) {
+    box-shadow: inset 4px 0 0 #60a5fa;
+    background: linear-gradient(90deg, rgba(30, 64, 175, 0.34) 0%, rgba(15, 23, 42, 0.92) 38%, rgba(15, 23, 42, 0.98) 100%);
   }
 
   :global(.dark .peaks-dt table.dataTable tbody tr.dt-group-row) {

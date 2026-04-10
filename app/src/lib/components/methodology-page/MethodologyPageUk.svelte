@@ -236,10 +236,10 @@
                 <a href="#columns" class="hover:underline">2. Колонки Excel</a>
                 <a href="#marks" class="hover:underline">3. Мітки оператора</a>
                 <a href="#algorithm" class="hover:underline">4. Алгоритм (Інтерактивний посібник)</a>
-                <a href="#output" class="hover:underline">4. Вихідні поля</a>
-                <a href="#params" class="hover:underline">5. Параметри</a>
-                <a href="#glossary" class="hover:underline">6. Глосарій</a>
-                <a href="#references" class="hover:underline">7. Посилання</a>
+                <a href="#output" class="hover:underline">5. Вихідні поля</a>
+                <a href="#params" class="hover:underline">6. Параметри</a>
+                <a href="#glossary" class="hover:underline">7. Глосарій</a>
+                <a href="#references" class="hover:underline">8. Посилання</a>
             </div>
         </nav>
 
@@ -348,7 +348,7 @@
           Це колонки, які користувач побачить у фінальному screened Excel-файлі.
         -->
         <section id="output" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">4. Вихідні поля</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">5. Вихідні поля</h2>
             <div class="space-y-3">
                 {#each outputFields as field}
                     <div class="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -371,7 +371,7 @@
             row[3] → етап конвеєра, що використовує параметр
         -->
         <section id="params" class="mb-10">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">5. Параметри толерантності</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">6. Параметри толерантності</h2>
             <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                 <table class="w-full text-sm">
                     <thead class="bg-slate-50 dark:bg-slate-700">
@@ -406,7 +406,7 @@
           що використовуються в документації методології.
         -->
         <section id="glossary" class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">6. Глосарій</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">7. Глосарій</h2>
             <div class="grid gap-3 sm:grid-cols-2">
                 {#each glossary as item}
                     <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
@@ -427,7 +427,7 @@
           tab-napping-атакам.
         -->
         <section id="references" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">7. Посилання</h2>
+            <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">8. Посилання</h2>
             <p class="mb-4 text-sm leading-7 text-slate-600 dark:text-slate-400">Базові терміни й регуляторний контекст, на які спирається ця методика.</p>
             <div class="space-y-3">
                 {#each refs as ref}
