@@ -13,6 +13,8 @@ export const ukMessages = {
     chooseFile: "Вибрати файл",
     downloadSample: "Завантажити приклад даних",
     downloadSampleFailed: "Не вдалося завантажити приклад даних",
+    downloadSampleCsv: "Завантажити CSV",
+    downloadSampleXlsx: "Завантажити XLSX",
     processingData: "Обробка даних...",
     screeningParameters: "Параметри скринінгу",
     qcControls: "QC-контроль",

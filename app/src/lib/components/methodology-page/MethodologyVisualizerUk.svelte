@@ -10,8 +10,18 @@
     import MathFormula from "./MathFormula.svelte";
     import { fade } from 'svelte/transition';
     import { cubicOut } from 'svelte/easing';
+    import { generateSampleData } from "$lib/screening";
+    import { t } from "$lib/i18n";
 
     let { defs = {} }: { defs?: Record<string, string> } = $props();
+
+    async function handleDownloadSample(format: "csv" | "xlsx") {
+        try {
+            await generateSampleData(format);
+        } catch (e) {
+            console.error(e);
+        }
+    }
 
     // ── Steps ────────────────────────────────────────────────────────────
     const steps = [
@@ -464,6 +474,14 @@
                             <div>
                                 <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Вхідні дані</h4>
                                 <p><GlossaryRichText text="Система приймає Excel (.xlsx / .xls) або CSV/TSV/TXT файли з LC-MS піковими даними, автоматично вибирає найкращий аркуш (для Excel) або парсить перший аркуш (для CSV) і очікує щонайменше два реплікати плюс одну blank-пробу." definitions={glossaryDefinitions} /></p>
+                                <div class="mt-3 flex gap-2">
+                                    <button onclick={() => handleDownloadSample("csv")} class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+                                        {t("downloadSampleCsv")}
+                                    </button>
+                                    <button onclick={() => handleDownloadSample("xlsx")} class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+                                        {t("downloadSampleXlsx")}
+                                    </button>
+                                </div>
                             </div>
 
                             <div>

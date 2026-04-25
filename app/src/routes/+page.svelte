@@ -16,7 +16,6 @@
         exportToXlsx,
         isServerMode,
         setServerMode,
-        generateSampleData,
     } from "$lib/screening";
     import type { ScreeningResult } from "$lib/screening";
     import {
@@ -24,7 +23,6 @@
         Loader2,
         Upload,
         Server,
-        Download,
     } from "lucide-svelte";
     import MethodologyPanel from "$lib/components/MethodologyPanel.svelte";
 
@@ -102,15 +100,6 @@
         setServerMode(serverMode);
         if (!serverMode) {
             error = "";
-        }
-    }
-
-    async function handleDownloadSample() {
-        try {
-            await generateSampleData();
-        } catch (e) {
-            error = t("downloadSampleFailed");
-            console.error(e);
         }
     }
 
@@ -412,15 +401,6 @@
                             disabled={loading}
                         />
                     </label>
-
-                    <button
-                        type="button"
-                        onclick={handleDownloadSample}
-                        class="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
-                    >
-                        <Download class="h-3.5 w-3.5" />
-                        {dict.downloadSample}
-                    </button>
 
                     {#if loading}
                         <div

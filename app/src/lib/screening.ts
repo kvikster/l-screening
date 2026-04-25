@@ -435,7 +435,7 @@ export async function exportToXlsx(
 
 // ─── Sample data generation ───────────────────────────────────────────────────
 
-export async function generateSampleData(): Promise<void> {
+export async function generateSampleData(format: "xlsx" | "csv" = "xlsx"): Promise<void> {
   const XLSX = await import("xlsx");
 
   const basePeaks = [120.5, 157.9, 195.2, 238.8, 285.1, 324.9];
@@ -481,10 +481,22 @@ export async function generateSampleData(): Promise<void> {
     });
   }
 
-  const ws = XLSX.utils.json_to_sheet([...sampleData, ...blankData]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Data");
-  XLSX.writeFile(wb, "sample_lcms_data.xlsx");
+  const allData = [...sampleData, ...blankData];
+
+  if (format === "csv") {
+    const ws = XLSX.utils.json_to_sheet(allData);
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "sample_lcms_data.csv";
+    link.click();
+  } else {
+    const ws = XLSX.utils.json_to_sheet(allData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    XLSX.writeFile(wb, "sample_lcms_data.xlsx");
+  }
 }
 
 // ─── Server-mode helpers ──────────────────────────────────────────────────────

@@ -13,6 +13,8 @@ export const ruMessages = {
     chooseFile: "Выбрать файл",
     downloadSample: "Скачать пример данных",
     downloadSampleFailed: "Не удалось скачать пример данных",
+    downloadSampleCsv: "Скачать CSV",
+    downloadSampleXlsx: "Скачать XLSX",
     processingData: "Обработка данных...",
     screeningParameters: "Параметры скрининга",
     qcControls: "QC-контроль",

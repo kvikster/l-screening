@@ -13,6 +13,8 @@ export const enMessages = {
     chooseFile: "Choose file",
     downloadSample: "Download sample data",
     downloadSampleFailed: "Failed to download sample data",
+    downloadSampleCsv: "Download CSV",
+    downloadSampleXlsx: "Download XLSX",
     processingData: "Processing data...",
     screeningParameters: "Screening Parameters",
     qcControls: "QC controls",
