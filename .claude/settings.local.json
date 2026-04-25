@@ -26,7 +26,8 @@
       "Bash(python -c \"from server.python-version.logic import ScreeningConfig, SurrogateSpec, build_screening_config; print\\('import OK'\\)\")",
       "Bash(python -c \"import sys; sys.path.insert\\(0,'server/python-version'\\); from logic import ScreeningConfig, SurrogateSpec, build_screening_config; print\\('import OK'\\)\")",
       "Bash(python3 -c \"import sys; sys.path.insert\\(0,'server/python-version'\\); from logic import ScreeningConfig, SurrogateSpec, build_screening_config; c = build_screening_config\\({'surrogates': [{'name': 'TestSurr', 'expected_rt': 5.0, 'expected_area': 100000.0}]}\\); print\\('OK', c.surrogates\\)\")",
-      "Bash(uv run *)"
+      "Bash(uv run *)",
+      "Bash(bun install *)"
     ]
   }
 }

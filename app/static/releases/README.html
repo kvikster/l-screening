@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Список релізів — LC-MS Screening</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #dbe4f0;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 12rem);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 72px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 18px 0 10px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+    }
+    p, li {
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 1.2rem;
+    }
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    li + li { margin-top: 10px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.95em;
+      background: #eff6ff;
+      color: #1d4ed8;
+      padding: 0.1em 0.4em;
+      border-radius: 6px;
+    }
+    .back {
+      display: inline-block;
+      margin-top: 24px;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back:hover { text-decoration: underline; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 28px 0 0; }
+    a { color: var(--accent); }
+
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <article class="card">
+      <div class="eyebrow">Release Notes</div>
+      <h1>Список релізів — LC-MS Screening</h1>
+<p>Усі версії проекту з коротким описом змін. Хронологія від найновішого.</p>
+<h2>Версії</h2>
+<table>
+<thead>
+<tr>
+<th>Версія</th>
+<th>Дата</th>
+<th>Основні зміни</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="./v0.8.0.html">v0.8.0</a></td>
+<td>2026-04-25</td>
+<td>LabSpaces: persistent workspace для datasets, analyzers та історії звітів</td>
+</tr>
+<tr>
+<td><a href="./v7.1.html">v0.7.1</a></td>
+<td>2026-04-25</td>
+<td>Стартова версія: blank subtraction до злиття, RT-only режим, surrogate standards</td>
+</tr>
+</tbody></table>
+<h2>Нотатки</h2>
+<ul>
+<li><code>v0.7.1</code> — точка відліку. Зміни попередніх версій не документовані.</li>
+<li>Кожна версія описує лише дельту відносно попередньої.</li>
+<li>Актуальна HTML-версія кожного релізу доступна в <code>app/static/releases/</code>.</li>
+</ul>
+
+      <a class="back" href="../">Повернутися до застосунку</a>
+    </article>
+  </main>
+</body>
+</html>
