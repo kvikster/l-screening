@@ -1,5 +1,40 @@
-use crate::config::ScreeningConfig;
+use crate::config::{CompoundThreshold, ScreeningConfig};
 use crate::types::MatchMetrics;
+
+/// Effective thresholds for a single peak, after resolving compound-level overrides.
+pub struct ResolvedThresholds {
+    pub signal_to_blank_min: f64,
+    pub cv_high_max: f64,
+    pub cv_moderate_max: f64,
+    pub min_area_difference: Option<f64>,
+}
+
+/// Resolve per-compound threshold overrides for a given peak label.
+/// First `label_contains` match in `config.compound_thresholds` wins.
+/// Falls back to global config values when no match or no label.
+pub fn resolve_thresholds(label: Option<&str>, config: &ScreeningConfig) -> ResolvedThresholds {
+    if let Some(lbl) = label {
+        let lbl_lower = lbl.to_lowercase();
+        if let Some(ct) = config
+            .compound_thresholds
+            .iter()
+            .find(|ct: &&CompoundThreshold| lbl_lower.contains(&ct.label_contains.to_lowercase()))
+        {
+            return ResolvedThresholds {
+                signal_to_blank_min: ct.signal_to_blank_min.unwrap_or(config.signal_to_blank_min),
+                cv_high_max: ct.cv_high_max.unwrap_or(config.cv_high_max),
+                cv_moderate_max: ct.cv_moderate_max.unwrap_or(config.cv_moderate_max),
+                min_area_difference: ct.min_area_difference.or(config.min_area_difference),
+            };
+        }
+    }
+    ResolvedThresholds {
+        signal_to_blank_min: config.signal_to_blank_min,
+        cv_high_max: config.cv_high_max,
+        cv_moderate_max: config.cv_moderate_max,
+        min_area_difference: config.min_area_difference,
+    }
+}
 
 pub fn safe_round(value: f64, digits: u32) -> f64 {
     let factor = 10f64.powi(digits as i32);
@@ -96,11 +131,11 @@ pub fn calc_cv_percent(values: &[f64]) -> Option<f64> {
     Some(std / mean * 100.0)
 }
 
-pub fn classify_replicate_quality(cv_percent: Option<f64>, config: &ScreeningConfig) -> &'static str {
+pub fn classify_replicate_quality(cv_percent: Option<f64>, cv_high_max: f64, cv_moderate_max: f64) -> &'static str {
     match cv_percent {
         None => "Unknown",
-        Some(cv) if cv <= config.cv_high_max => "High",
-        Some(cv) if cv <= config.cv_moderate_max => "Moderate",
+        Some(cv) if cv <= cv_high_max => "High",
+        Some(cv) if cv <= cv_moderate_max => "Moderate",
         _ => "Low",
     }
 }
@@ -113,7 +148,9 @@ pub fn replicate_confidence_score(
     cv_percent: Option<f64>,
     color_paired: bool,
     use_mz: bool,
-    config: &ScreeningConfig,
+    mz_available: bool,
+    cv_high_max: f64,
+    cv_moderate_max: f64,
 ) -> f64 {
     let mut score = 100.0_f64;
     score -= fraction_of_tol(rt_delta, rt_tol) * 20.0;
@@ -123,7 +160,7 @@ pub fn replicate_confidence_score(
         // fallback is a defensive guard for correctness in release builds.
         let delta = mz_delta_in_mode.unwrap_or(0.0);
         score -= fraction_of_tol(delta, mz_tol) * 25.0;
-    } else if config.mz_available {
+    } else if mz_available {
         // m/z column exists but this specific cluster pair couldn't use it.
         score -= 10.0;
     }
@@ -133,9 +170,9 @@ pub fn replicate_confidence_score(
 
     match cv_percent {
         None => score -= 10.0,
-        Some(cv) if cv <= config.cv_high_max => {}
-        Some(cv) if cv <= config.cv_moderate_max => score -= 12.0,
-        Some(cv) => score -= (12.0 + (cv - config.cv_moderate_max) * 0.7_f64).min(35.0),
+        Some(cv) if cv <= cv_high_max => {}
+        Some(cv) if cv <= cv_moderate_max => score -= 12.0,
+        Some(cv) => score -= (12.0 + (cv - cv_moderate_max) * 0.7_f64).min(35.0),
     }
 
     if !color_paired {
@@ -149,7 +186,7 @@ pub fn final_confidence_score(
     replicate_score: f64,
     has_blank_match: bool,
     signal_to_blank_ratio: Option<f64>,
-    config: &ScreeningConfig,
+    signal_to_blank_min: f64,
 ) -> f64 {
     let mut score = replicate_score;
     if !has_blank_match {
@@ -157,12 +194,11 @@ pub fn final_confidence_score(
     } else {
         match signal_to_blank_ratio {
             None => score -= 10.0,
-            Some(ratio) if ratio >= config.signal_to_blank_min => {
-                score += ((ratio - config.signal_to_blank_min) * 0.5_f64).min(5.0);
+            Some(ratio) if ratio >= signal_to_blank_min => {
+                score += ((ratio - signal_to_blank_min) * 0.5_f64).min(5.0);
             }
             Some(ratio) => {
-                let deficit = (config.signal_to_blank_min - ratio)
-                    / config.signal_to_blank_min.max(1e-9);
+                let deficit = (signal_to_blank_min - ratio) / signal_to_blank_min.max(1e-9);
                 score -= 15.0 + (deficit * 30.0).min(30.0);
             }
         }

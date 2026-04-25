@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::config::ScreeningConfig;
 use crate::math::{
     calc_cv_percent, classify_replicate_quality, match_metrics,
-    replicate_confidence_score, safe_round,
+    replicate_confidence_score, resolve_thresholds, safe_round,
 };
 use crate::types::{ClusterMember, ConfirmedRow, Row};
 
@@ -255,7 +255,12 @@ pub fn cluster_to_confirmed_row(
     };
 
     let area_cv_pct = calc_cv_percent(&area_values);
-    let replicate_quality = classify_replicate_quality(area_cv_pct, config).to_string();
+    let first = member_rows[0];
+    let second = member_rows.get(1).copied();
+    let thresholds = resolve_thresholds(first.label.as_deref(), config);
+    let replicate_quality =
+        classify_replicate_quality(area_cv_pct, thresholds.cv_high_max, thresholds.cv_moderate_max)
+            .to_string();
     let pm = pairwise_cluster_metrics(members, rows, config);
 
     let rep_score = replicate_confidence_score(
@@ -266,12 +271,11 @@ pub fn cluster_to_confirmed_row(
         area_cv_pct,
         colour_split,
         pm.uses_mz,
-        config,
+        config.mz_available,
+        thresholds.cv_high_max,
+        thresholds.cv_moderate_max,
     );
     let matching_mode = if pm.uses_mz { "RT+MZ" } else { "RT" }.to_string();
-
-    let first = member_rows[0];
-    let second = member_rows.get(1).copied();
 
     // Build Why.ReplicateMembers
     let replicate_members: Vec<Value> = members

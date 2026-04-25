@@ -27,7 +27,10 @@
       "Bash(python -c \"import sys; sys.path.insert\\(0,'server/python-version'\\); from logic import ScreeningConfig, SurrogateSpec, build_screening_config; print\\('import OK'\\)\")",
       "Bash(python3 -c \"import sys; sys.path.insert\\(0,'server/python-version'\\); from logic import ScreeningConfig, SurrogateSpec, build_screening_config; c = build_screening_config\\({'surrogates': [{'name': 'TestSurr', 'expected_rt': 5.0, 'expected_area': 100000.0}]}\\); print\\('OK', c.surrogates\\)\")",
       "Bash(uv run *)",
-      "Bash(bun install *)"
+      "Bash(bun install *)",
+      "Bash(cargo build *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import json; data = json.load\\(open\\('/Users/vkey/Documents/_/l-screening/tests/_wasm_output.json'\\)\\); confirmed = data.get\\('confirmed', []\\); print\\(f'Total confirmed rows: {len\\(confirmed\\)}'\\); print\\(f'Input rows in test: ~100'\\)\")"
     ]
   }
 }

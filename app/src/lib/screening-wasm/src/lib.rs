@@ -12,15 +12,19 @@ use wasm_bindgen::prelude::*;
 use blank::{apply_blank_result, blank_candidates};
 use cluster::coarse_screen;
 use config::ScreeningConfig;
-use math::{calc_cv_percent, match_metrics, replicate_confidence_score, safe_round};
+use math::{calc_cv_percent, final_confidence_score, match_metrics, replicate_confidence_score, resolve_thresholds, safe_round};
 use types::{ConfirmedRow, MatchMetrics, Row, SummaryRow};
 
 // Maps operator_mark → canonical SampleType.
-fn mark_to_stype(mark: &str) -> Option<&'static str> {
+// Checks config.mark_aliases first, then falls back to built-in defaults.
+fn mark_to_stype(mark: &str, config: &ScreeningConfig) -> Option<String> {
+    if let Some(stype) = config.mark_aliases.get(mark) {
+        return Some(stype.clone());
+    }
     match mark {
-        "blank_positive" | "blank_negative" => Some("blank"),
-        "sample_rep1" | "sample_rep2" => Some("sample"),
-        "surrogate" | "surrogate_positive" | "surrogate_negative" => Some("surrogate"),
+        "blank_positive" | "blank_negative" => Some("blank".to_string()),
+        "sample_rep1" | "sample_rep2" => Some("sample".to_string()),
+        "surrogate" | "surrogate_positive" | "surrogate_negative" => Some("surrogate".to_string()),
         _ => None,
     }
 }
@@ -40,10 +44,10 @@ fn classify_from_filename(filename: &str) -> String {
     "unknown".to_string()
 }
 
-fn assign_sample_type(row: &Row) -> String {
+fn assign_sample_type(row: &Row, config: &ScreeningConfig) -> String {
     if let Some(mark) = &row.operator_mark {
-        if let Some(stype) = mark_to_stype(mark) {
-            return stype.to_string();
+        if let Some(stype) = mark_to_stype(mark, config) {
+            return stype;
         }
     }
     classify_from_filename(&row.file)
@@ -258,7 +262,14 @@ fn merge_parallel_cluster(
     let mean_or_zero = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
     let max_or_none = |v: &[f64]| if v.is_empty() { None } else { Some(v.iter().cloned().fold(0.0_f64, f64::max)) };
     let uses_mz = !mz_deltas_in_mode.is_empty();
-    let replicate_quality = crate::math::classify_replicate_quality(area_cv_pct, config).to_string();
+    let merge_label = member_rows.first().and_then(|r| r.rep1_label.as_deref());
+    let thresholds = resolve_thresholds(merge_label, config);
+    let replicate_quality = crate::math::classify_replicate_quality(
+        area_cv_pct,
+        thresholds.cv_high_max,
+        thresholds.cv_moderate_max,
+    )
+    .to_string();
     let rep_score = replicate_confidence_score(
         mean_or_zero(&rt_deltas),
         config.replicate_rt_tol,
@@ -267,7 +278,9 @@ fn merge_parallel_cluster(
         area_cv_pct,
         parallel_source_samples.len() > 1,
         uses_mz,
-        config,
+        config.mz_available,
+        thresholds.cv_high_max,
+        thresholds.cv_moderate_max,
     );
     let matching_mode = if uses_mz && member_rows.iter().all(|r| r.matching_mode == "RT+MZ") {
         "RT+MZ"
@@ -303,15 +316,15 @@ fn merge_parallel_cluster(
     } else {
         match agg_signal_to_blank_ratio {
             None => "Artifact".to_string(),
-            Some(r) if r < config.signal_to_blank_min => "Artifact".to_string(),
+            Some(r) if r < thresholds.signal_to_blank_min => "Artifact".to_string(),
             _ => "Real Compound".to_string(),
         }
     };
-    let agg_confidence_score = crate::math::final_confidence_score(
+    let agg_confidence_score = final_confidence_score(
         rep_score,
         has_blank_match,
         agg_signal_to_blank_ratio,
-        config,
+        thresholds.signal_to_blank_min,
     );
     let total_blank_candidate_count: u64 = member_rows
         .iter()
@@ -516,6 +529,10 @@ fn surrogate_validation_pass(surrogates: &mut [ConfirmedRow], config: &Screening
                 "Surrogate Failed".to_string()
             };
 
+            let is_response_factor = spec.expected_concentration.filter(|&c| c > 0.0).map(|c| {
+                safe_round(row.area_mean / c, 4)
+            });
+
             if let Some(why_obj) = row.why.as_object_mut() {
                 why_obj.insert(
                     "SurrogateValidation".into(),
@@ -532,6 +549,8 @@ fn surrogate_validation_pass(surrogates: &mut [ConfirmedRow], config: &Screening
                         "RecoveryMin": min_pct,
                         "RecoveryMax": max_pct,
                         "Pass": pass,
+                        "ExpectedConcentration": spec.expected_concentration,
+                        "ISResponseFactor": is_response_factor,
                     }),
                 );
             }
@@ -654,7 +673,7 @@ fn process_peaks_inner(rows_json: &str, config_json: &str) -> Result<String, Str
 
     // Validate required fields and assign SampleType.
     for row in &mut rows {
-        row.sample_type = assign_sample_type(row);
+        row.sample_type = assign_sample_type(row, &config);
     }
 
     // Group row indices by (SampleType, Polarity).

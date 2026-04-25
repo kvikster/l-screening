@@ -40,6 +40,20 @@ class SurrogateSpec:
     rt_window: float | None = None
     recovery_min_pct: float = 70.0
     recovery_max_pct: float = 130.0
+    # Expected concentration in sample matrix (ng/mL or µg/L; units user-defined).
+    # Foundation for IS-based response-factor normalization in quantitative workflows.
+    expected_concentration: float | None = None
+
+
+@dataclass(frozen=True)
+class CompoundThreshold:
+    """Per-compound threshold override matched against peak Label by case-insensitive substring.
+    First match in ScreeningConfig.compound_thresholds wins."""
+    label_contains: str
+    signal_to_blank_min: float | None = None
+    cv_high_max: float | None = None
+    cv_moderate_max: float | None = None
+    min_area_difference: float | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +70,11 @@ class ScreeningConfig:
     mz_available: bool = True
     min_area_difference: float | None = None
     surrogates: tuple = ()  # tuple[SurrogateSpec, ...]
+    # Custom operator_mark → sample type mappings. Extends built-in _MARK_TO_STYPE.
+    # Example: (("patient_a", "sample"), ("process_blank", "blank"))
+    mark_aliases: tuple = ()  # tuple[tuple[str, str], ...]
+    # Per-compound threshold overrides. First label_contains match wins.
+    compound_thresholds: tuple = ()  # tuple[CompoundThreshold, ...]
 
 
 def build_screening_config(overrides: Dict[str, Any] | None = None) -> ScreeningConfig:
@@ -63,13 +82,25 @@ def build_screening_config(overrides: Dict[str, Any] | None = None) -> Screening
         return ScreeningConfig()
 
     values = asdict(ScreeningConfig())
-    # surrogates is handled separately below (complex objects, not simple scalars)
-    values.update({k: v for k, v in overrides.items() if k != "surrogates" and v is not None})
+    # Complex fields handled separately.
+    simple_skip = {"surrogates", "mark_aliases", "compound_thresholds"}
+    values.update({k: v for k, v in overrides.items() if k not in simple_skip and v is not None})
     raw_surrogates = overrides.get("surrogates") or []
     values["surrogates"] = tuple(
         SurrogateSpec(**{k: v for k, v in s.items() if k in SurrogateSpec.__dataclass_fields__})
         if isinstance(s, dict) else s
         for s in raw_surrogates
+    )
+    raw_aliases = overrides.get("mark_aliases") or {}
+    if isinstance(raw_aliases, dict):
+        values["mark_aliases"] = tuple(raw_aliases.items())
+    else:
+        values["mark_aliases"] = tuple(raw_aliases)
+    raw_ct = overrides.get("compound_thresholds") or []
+    values["compound_thresholds"] = tuple(
+        CompoundThreshold(**{k: v for k, v in ct.items() if k in CompoundThreshold.__dataclass_fields__})
+        if isinstance(ct, dict) else ct
+        for ct in raw_ct
     )
 
     replicate_mz_mode = str(values["replicate_mz_mode"]).lower().strip()
@@ -100,6 +131,28 @@ def build_screening_config(overrides: Dict[str, Any] | None = None) -> Screening
     return ScreeningConfig(**values)
 
 
+def _resolve_thresholds(label: str | None, config: ScreeningConfig) -> Dict[str, Any]:
+    """Resolve per-compound threshold overrides for a given peak label.
+    First label_contains match in config.compound_thresholds wins.
+    Falls back to global config values when no match or no label."""
+    if label:
+        lbl_lower = label.lower()
+        for ct in config.compound_thresholds:
+            if ct.label_contains.lower() in lbl_lower:
+                return {
+                    "signal_to_blank_min": ct.signal_to_blank_min if ct.signal_to_blank_min is not None else config.signal_to_blank_min,
+                    "cv_high_max": ct.cv_high_max if ct.cv_high_max is not None else config.cv_high_max,
+                    "cv_moderate_max": ct.cv_moderate_max if ct.cv_moderate_max is not None else config.cv_moderate_max,
+                    "min_area_difference": ct.min_area_difference if ct.min_area_difference is not None else config.min_area_difference,
+                }
+    return {
+        "signal_to_blank_min": config.signal_to_blank_min,
+        "cv_high_max": config.cv_high_max,
+        "cv_moderate_max": config.cv_moderate_max,
+        "min_area_difference": config.min_area_difference,
+    }
+
+
 def _classify_from_filename(filename: str) -> str:
     f = str(filename).lower()
     if "blank" in f:
@@ -110,10 +163,14 @@ def _classify_from_filename(filename: str) -> str:
     return "unknown"
 
 
-def _assign_sample_type(row: pd.Series) -> str:
+def _assign_sample_type(row: pd.Series, config: ScreeningConfig) -> str:
     mark = row.get("operator_mark")
-    if mark and mark in _MARK_TO_STYPE:
-        return _MARK_TO_STYPE[mark]
+    if mark:
+        for alias_mark, alias_stype in config.mark_aliases:
+            if mark == alias_mark:
+                return alias_stype
+        if mark in _MARK_TO_STYPE:
+            return _MARK_TO_STYPE[mark]
     return _classify_from_filename(row["File"])
 
 
@@ -180,12 +237,12 @@ def _calc_cv_percent(values: List[float]) -> float | None:
     return std / mean * 100
 
 
-def _classify_replicate_quality(cv_percent: float | None, config: ScreeningConfig) -> str:
+def _classify_replicate_quality(cv_percent: float | None, cv_high_max: float, cv_moderate_max: float) -> str:
     if cv_percent is None:
         return "Unknown"
-    if cv_percent <= config.cv_high_max:
+    if cv_percent <= cv_high_max:
         return "High"
-    if cv_percent <= config.cv_moderate_max:
+    if cv_percent <= cv_moderate_max:
         return "Moderate"
     return "Low"
 
@@ -198,23 +255,25 @@ def _replicate_confidence_score(
     cv_percent: float | None,
     color_paired: bool,
     use_mz: bool,
-    config: ScreeningConfig,
+    mz_available: bool,
+    cv_high_max: float,
+    cv_moderate_max: float,
 ) -> float:
     score = 100.0
     score -= _fraction_of_tol(rt_delta, rt_tol) * 20
     if use_mz and mz_delta_in_mode is not None:
         score -= _fraction_of_tol(mz_delta_in_mode, mz_tol) * 25
-    elif config.mz_available:
+    elif mz_available:
         score -= 10
 
     if cv_percent is None:
         score -= 10
-    elif cv_percent <= config.cv_high_max:
+    elif cv_percent <= cv_high_max:
         pass
-    elif cv_percent <= config.cv_moderate_max:
+    elif cv_percent <= cv_moderate_max:
         score -= 12
     else:
-        score -= min(35, 12 + (cv_percent - config.cv_moderate_max) * 0.7)
+        score -= min(35, 12 + (cv_percent - cv_moderate_max) * 0.7)
 
     if not color_paired:
         score -= 5
@@ -226,17 +285,17 @@ def _final_confidence_score(
     replicate_score: float,
     has_blank_match: bool,
     signal_to_blank_ratio: float | None,
-    config: ScreeningConfig,
+    signal_to_blank_min: float,
 ) -> float:
     score = float(replicate_score)
     if not has_blank_match:
         score += 3
     elif signal_to_blank_ratio is None:
         score -= 10
-    elif signal_to_blank_ratio >= config.signal_to_blank_min:
-        score += min(5, (signal_to_blank_ratio - config.signal_to_blank_min) * 0.5)
+    elif signal_to_blank_ratio >= signal_to_blank_min:
+        score += min(5, (signal_to_blank_ratio - signal_to_blank_min) * 0.5)
     else:
-        deficit = (config.signal_to_blank_min - signal_to_blank_ratio) / max(config.signal_to_blank_min, 1e-9)
+        deficit = (signal_to_blank_min - signal_to_blank_ratio) / max(signal_to_blank_min, 1e-9)
         score -= 15 + min(30, deficit * 30)
 
     return round(max(0.0, min(score, 100.0)), 1)
@@ -473,7 +532,9 @@ def _cluster_to_confirmed_row(
     mz_values = _compact_list([_optional_float(row.get("Base Peak")) for row in rows])
     area_mean = sum(area_values) / len(area_values)
     area_cv_pct = _calc_cv_percent(area_values)
-    replicate_quality = _classify_replicate_quality(area_cv_pct, config)
+    first_row = rows[0]
+    thresholds = _resolve_thresholds(first_row.get("Label"), config)
+    replicate_quality = _classify_replicate_quality(area_cv_pct, thresholds["cv_high_max"], thresholds["cv_moderate_max"])
     pairwise_metrics = _pairwise_cluster_metrics(rows, config)
     matching_mode = "RT+MZ" if pairwise_metrics["uses_mz"] else "RT"
     replicate_score = _replicate_confidence_score(
@@ -484,10 +545,10 @@ def _cluster_to_confirmed_row(
         cv_percent=area_cv_pct,
         color_paired=colour_split,
         use_mz=pairwise_metrics["uses_mz"],
-        config=config,
+        mz_available=config.mz_available,
+        cv_high_max=thresholds["cv_high_max"],
+        cv_moderate_max=thresholds["cv_moderate_max"],
     )
-
-    first_row = rows[0]
     second_row = rows[1] if len(rows) > 1 else None
     replicate_labels = [row.get("Label") for row in rows]
     replicate_marks = [row.get("operator_mark") for row in rows]
@@ -697,14 +758,15 @@ def _apply_per_sample_blank_subtraction(
 
     area_diff = (peak_area - blank_area) if blank_area is not None else None
 
+    thresholds = _resolve_thresholds(peak.get("Rep1_Label"), config)
     if not has_blank_match:
         status = "Real Compound"
     else:
-        ratio_fail = ratio is None or ratio < config.signal_to_blank_min
+        ratio_fail = ratio is None or ratio < thresholds["signal_to_blank_min"]
         area_diff_fail = (
-            config.min_area_difference is not None
+            thresholds["min_area_difference"] is not None
             and area_diff is not None
-            and area_diff < config.min_area_difference
+            and area_diff < thresholds["min_area_difference"]
         )
         status = "Artifact" if (ratio_fail or area_diff_fail) else "Real Compound"
 
@@ -716,7 +778,7 @@ def _apply_per_sample_blank_subtraction(
         float(peak["ReplicateConfidenceScore"]),
         has_blank_match=has_blank_match,
         signal_to_blank_ratio=ratio,
-        config=config,
+        signal_to_blank_min=thresholds["signal_to_blank_min"],
     )
 
     blank_detail: Dict[str, Any] | None = None
@@ -899,7 +961,9 @@ def _merge_parallel_cluster(
         }
 
     matching_mode = "RT+MZ" if pairwise_metrics["uses_mz"] and all(row.get("MatchingMode") == "RT+MZ" for row in rows) else "RT"
-    replicate_quality = _classify_replicate_quality(area_cv_pct, config)
+    merge_label = rows[0].get("Rep1_Label") if rows else None
+    merge_thresholds = _resolve_thresholds(merge_label, config)
+    replicate_quality = _classify_replicate_quality(area_cv_pct, merge_thresholds["cv_high_max"], merge_thresholds["cv_moderate_max"])
     replicate_score = _replicate_confidence_score(
         rt_delta=pairwise_metrics["mean_rt_delta"],
         rt_tol=config.replicate_rt_tol,
@@ -908,7 +972,9 @@ def _merge_parallel_cluster(
         cv_percent=area_cv_pct,
         color_paired=len(source_sample_types) > 1,
         use_mz=pairwise_metrics["uses_mz"],
-        config=config,
+        mz_available=config.mz_available,
+        cv_high_max=merge_thresholds["cv_high_max"],
+        cv_moderate_max=merge_thresholds["cv_moderate_max"],
     )
 
     all_labels = replicate_labels + [row.get("Rep1_Label") for row in rows] + [row.get("Rep2_Label") for row in rows]
@@ -941,7 +1007,7 @@ def _merge_parallel_cluster(
 
     if not has_blank_match:
         agg_status = "Real Compound"
-    elif agg_ratio is None or agg_ratio < config.signal_to_blank_min:
+    elif agg_ratio is None or agg_ratio < merge_thresholds["signal_to_blank_min"]:
         agg_status = "Artifact"
     else:
         agg_status = "Real Compound"
@@ -950,7 +1016,7 @@ def _merge_parallel_cluster(
         replicate_score,
         has_blank_match=has_blank_match,
         signal_to_blank_ratio=agg_ratio,
-        config=config,
+        signal_to_blank_min=merge_thresholds["signal_to_blank_min"],
     )
 
     per_source_blank = [
@@ -1210,6 +1276,11 @@ def _surrogate_validation_pass(
             row["Status"] = "Surrogate OK" if passed else "Surrogate Failed"
 
             why = row.get("Why") or {}
+            is_response_factor = (
+                _safe_round(area_mean / best.expected_concentration, 4)
+                if best.expected_concentration and best.expected_concentration > 0
+                else None
+            )
             why["SurrogateValidation"] = {
                 "MatchedSpec": best.name,
                 "ExpectedRT": best.expected_rt,
@@ -1223,6 +1294,8 @@ def _surrogate_validation_pass(
                 "RecoveryMin": min_pct,
                 "RecoveryMax": max_pct,
                 "Pass": passed,
+                "ExpectedConcentration": best.expected_concentration,
+                "ISResponseFactor": is_response_factor,
             }
             row["Why"] = why
         else:
@@ -1260,7 +1333,7 @@ def process_peaks(
     if "Label" not in df.columns:
         df["Label"] = None
 
-    df["SampleType"] = df.apply(_assign_sample_type, axis=1)
+    df["SampleType"] = df.apply(lambda row: _assign_sample_type(row, config), axis=1)
     df["SummarySampleType"] = df["SampleType"].apply(_parallel_sample_family)
 
     coarse_rows = []

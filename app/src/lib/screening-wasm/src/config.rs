@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 pub const RT_TOL: f64 = 0.1;
@@ -21,6 +23,21 @@ pub struct SurrogateSpec {
     pub recovery_min_pct: Option<f64>,
     /// Maximum acceptable recovery % (default 130.0).
     pub recovery_max_pct: Option<f64>,
+    /// Expected concentration in sample matrix (ng/mL or µg/L; units are user-defined).
+    /// Foundation for IS-based response-factor normalization in quantitative workflows.
+    pub expected_concentration: Option<f64>,
+}
+
+/// Per-compound threshold override matched against peak Label by case-insensitive substring.
+/// First match in `compound_thresholds` wins; unmatched peaks use global config values.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompoundThreshold {
+    /// Substring to match against peak Label (case-insensitive). E.g. "caffeine", "IS_".
+    pub label_contains: String,
+    pub signal_to_blank_min: Option<f64>,
+    pub cv_high_max: Option<f64>,
+    pub cv_moderate_max: Option<f64>,
+    pub min_area_difference: Option<f64>,
 }
 pub const DEFAULT_SIGNAL_TO_BLANK_MIN: f64 = 3.0;
 pub const DEFAULT_CV_HIGH_MAX: f64 = 15.0;
@@ -61,6 +78,15 @@ pub struct ScreeningConfig {
     /// (operator_mark = "surrogate") are validated against these specs.
     #[serde(default)]
     pub surrogates: Vec<SurrogateSpec>,
+    /// Custom operator_mark → sample type mappings. Extends built-in defaults.
+    /// Valid target values: "blank", "sample", "surrogate".
+    /// Example: {"patient_a": "sample", "process_blank": "blank"}
+    #[serde(default)]
+    pub mark_aliases: HashMap<String, String>,
+    /// Per-compound threshold overrides. First `label_contains` match wins.
+    /// Enables different S/B thresholds per analyte class (e.g. tighter for drugs in blood).
+    #[serde(default)]
+    pub compound_thresholds: Vec<CompoundThreshold>,
 }
 
 fn default_rt_tol() -> f64 { RT_TOL }
@@ -124,6 +150,8 @@ impl Default for ScreeningConfig {
             mz_available: true,
             min_area_difference: None,
             surrogates: vec![],
+            mark_aliases: HashMap::new(),
+            compound_thresholds: vec![],
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::config::ScreeningConfig;
-use crate::math::{match_metrics, safe_round};
+use crate::math::{match_metrics, resolve_thresholds, safe_round};
 use crate::types::{BlankCandidate, ConfirmedRow};
 
 /// Find all blank confirmed-rows that match a sample peak within blank tolerances.
@@ -66,6 +66,8 @@ pub fn apply_blank_result(
     use crate::math::final_confidence_score;
     use serde_json::json;
 
+    let thresholds = resolve_thresholds(peak.rep1_label.as_deref(), config);
+
     let best = candidates.first();
 
     let signal_to_blank_ratio = best.and_then(|cand| {
@@ -82,8 +84,10 @@ pub fn apply_blank_result(
     let area_difference = best.map(|cand| peak.area_mean - blanks[cand.blank_row_idx].area_mean);
 
     let status = if has_blank_match {
-        let ratio_fail = signal_to_blank_ratio.map_or(true, |r| r < config.signal_to_blank_min);
-        let area_diff_fail = config.min_area_difference
+        let ratio_fail =
+            signal_to_blank_ratio.map_or(true, |r| r < thresholds.signal_to_blank_min);
+        let area_diff_fail = thresholds
+            .min_area_difference
             .zip(area_difference)
             .map_or(false, |(min_diff, diff)| diff < min_diff);
         if ratio_fail || area_diff_fail { "Artifact" } else { "Real Compound" }
@@ -99,7 +103,7 @@ pub fn apply_blank_result(
         peak.replicate_confidence_score,
         has_blank_match,
         signal_to_blank_ratio,
-        config,
+        thresholds.signal_to_blank_min,
     );
 
     // Extend Why with blank subtraction results.
@@ -110,8 +114,8 @@ pub fn apply_blank_result(
             "SignalToBlankRatio".into(),
             json!(signal_to_blank_ratio.map(|v| safe_round(v, 2))),
         );
-        why_obj.insert("SignalToBlankThreshold".into(), json!(config.signal_to_blank_min));
-        why_obj.insert("MinAreaDifference".into(), json!(config.min_area_difference));
+        why_obj.insert("SignalToBlankThreshold".into(), json!(thresholds.signal_to_blank_min));
+        why_obj.insert("MinAreaDifference".into(), json!(thresholds.min_area_difference));
         why_obj.insert("BlankAreaMean".into(), json!(peak.blank_area_mean));
         why_obj.insert("AreaDifference".into(), json!(peak.area_difference));
         why_obj.insert("ConfidenceScore".into(), json!(peak.confidence_score));
