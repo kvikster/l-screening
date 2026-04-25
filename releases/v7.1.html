@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Реліз v0.7.1</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #dbe4f0;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 12rem);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 72px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 18px 0 10px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+    }
+    p, li {
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 1.2rem;
+    }
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    li + li { margin-top: 10px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.95em;
+      background: #eff6ff;
+      color: #1d4ed8;
+      padding: 0.1em 0.4em;
+      border-radius: 6px;
+    }
+    .back {
+      display: inline-block;
+      margin-top: 24px;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back:hover { text-decoration: underline; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 28px 0 0; }
+    a { color: var(--accent); }
+
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <article class="card">
+      <div class="eyebrow">Release Notes</div>
+      <h1>Реліз v0.7.1</h1>
+<p><code>v0.7.1</code> — стартова версія. Вирішує головне: як правильно порівняти пробу з холостим, коли обидва виміряні кілька разів; як працювати з приладами без мас-детектора; як врахувати сурогатні стандарти, не змішуючи їх з реальними компонентами.</p>
+<h2>Що змінилося для користувача</h2>
+<ul>
+<li>Blank subtraction тепер виконується до злиття паралельних sample-рядків. Це зменшує ризик, що усереднення замаскує локальне забруднення в окремій пробі.</li>
+<li>У результатах додано явні поля <code>AreaDifference</code> та <code>SignalToBlankRatio</code>, щоб було видно не лише підсумковий статус, а й причину рішення.</li>
+<li>Алгоритм коректно працює з RT-only наборами даних, де немає колонки <code>Base Peak</code>:
+GC-FID, LC-UV та інші немас-спектрометричні інструменти більше не отримують штучний штраф за відсутність m/z.</li>
+<li>Додано підтримку surrogate standards як окремого типу рядків:
+сурогати можна маркувати через <code>operator_mark=&quot;surrogate&quot;</code>, вони проходять окрему валідацію, не віднімаються як blank і залишаються у фінальному виводі.</li>
+<li>Для сурогатів у вихідних даних тепер доступні:
+<code>IsSurrogate</code>, <code>SurrogateRecoveryPct</code>, <code>SurrogateRtShift</code>, <code>SurrogatePass</code>, а також деталізований блок <code>Why.SurrogateValidation</code>.</li>
+<li>Опис методології в інтерфейсі оновлено:
+у ньому прямо вказано підтримку RT-only режиму та уточнено поточну логіку обробки.</li>
+</ul>
+<h2>Що це означає на практиці</h2>
+<ul>
+<li>Менше хибних <code>Real Compound</code> або <code>Artifact</code> через передчасне злиття різних sample-джерел.</li>
+<li>Більш прозорий аудит рішень у таблиці результатів та в експорті.</li>
+<li>Можна стабільно працювати не лише з LC-MS, а й з RT-only експортами без ручних обхідних кроків.</li>
+<li>З&#39;явився повноцінний контроль surrogate recovery та RT drift у тому ж пайплайні скринінгу.</li>
+</ul>
+<hr>
+<p><a href="./README.html">← Повернутися до списку релізів</a></p>
+
+      <a class="back" href="../">Повернутися до застосунку</a>
+    </article>
+  </main>
+</body>
+</html>

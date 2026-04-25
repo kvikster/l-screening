@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="uk">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="text-scale" content="scale" />
+        <meta name="theme-color" content="#2563eb" />
+        <script>
+            (function () {
+                var locale = localStorage.getItem("locale");
+                if (locale) {
+                    document.documentElement.lang = locale;
+                }
+                var t = localStorage.getItem("theme");
+                if (t === "dark" || (!t || t === "auto") && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+                    document.documentElement.classList.add("dark");
+                }
+            })();
+        </script>
+        <link href="/l-screening/_app/immutable/entry/start.BSqe4amV.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/C0VnOkLL.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/CJlkz4k8.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/B2Jyx89J.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/iKPLC-nJ.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/entry/app.CZhOKHLJ.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/BGUsNQ8O.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/BxyEe0pF.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/Bz_CBsO5.js" rel="modulepreload">
+		<link href="/l-screening/_app/immutable/chunks/CC_I43vc.js" rel="modulepreload">
+		
+    </head>
+    <body data-sveltekit-preload-data="hover">
+        <div style="display: contents">
+			<script>
+				{
+					__sveltekit_1m8pru8 = {
+						base: new URL('.', location).pathname.slice(0, -1),
+						assets: "/l-screening"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/l-screening/_app/immutable/entry/start.BSqe4amV.js"),
+						import("/l-screening/_app/immutable/entry/app.CZhOKHLJ.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+
+					if ('serviceWorker' in navigator) {
+						addEventListener('load', function () {
+							navigator.serviceWorker.register('/l-screening/service-worker.js');
+						});
+					}
+				}
+			</script>
+		</div>
+    </body>
+</html>
