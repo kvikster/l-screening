@@ -70,7 +70,7 @@
             short: "Peak confirmation",
             tone: "blue",
             summary: "Peaks from the same sample but different measurements (replicates) are grouped. We verify the same compound is present in multiple measurements.",
-            deepDive: "Greedy clustering: the peak with the largest area becomes the seed. From other replicate buckets, the closest peak in (RT + m/z) is selected. If matches are found in \u2265 2 buckets, the cluster is confirmed.",
+            deepDive: "Greedy clustering: the peak with the largest area becomes the seed. From other replicate buckets, the closest peak in (RT + m/z) is selected. If matches are found in \u2265 2 buckets, the cluster is confirmed. The algorithm also supports RT-only mode (GC-FID, LC-UV, and other non-MS instruments): if the dataset has no \u2018Base Peak\u2019 column, clustering and blank subtraction run on RT alone, and no confidence penalty is applied for missing m/z.",
             input: ["Peaks in replicate buckets"],
             action: ["Sort by descending Area", "Average centroid upon addition", "Verify tolerance windows"],
             output: ["Confirmed clusters"],
@@ -89,6 +89,19 @@
             output: ["Sample \u2194 Blank pairs with ratios"],
             formula: "Ratio (S/B) = mean(Area_sample) / mean(Area_blank)",
             formulaExplanation: "Average area in the sample divided by average area in the blank. Averaging protects against accidental spikes."
+        },
+        {
+            id: "parallel_merge",
+            title: "Parallel Sample Merge",
+            short: "sample_1 ∩ sample_2",
+            tone: "indigo",
+            summary: "Confirmed sample clusters from different parallel samples (sample_1, sample_2 …) are merged into a single row. Each source sample already has its own blank subtraction status before merging.",
+            deepDive: "The merge is weighted by replicate count. If only one sample had a blank match, blank_area_mean is aggregated only from that source. The S/B ratio and status are re-evaluated at the aggregated level, so a noisy sample does not corrupt the final conclusion.",
+            input: ["Per-sample clusters with blank subtraction status"],
+            action: ["Greedy clustering across samples (RT + m/z)", "Weighted averaging (area, RT, mz)", "Aggregate blank_area_mean from sources with a match", "Re-calculate S/B and confidence_score"],
+            output: ["Merged ConfirmedRow with Why.BlankSubtraction.PerSource[]"],
+            formula: "S/B_merged = Area_merged / blank_area_mean_weighted",
+            formulaExplanation: "The aggregated blank_area_mean is computed as a weighted mean only from sources that had a blank match. Sources without a match do not dilute the denominator or mask a real signal."
         },
         {
             id: "decision",
@@ -121,7 +134,7 @@
     // ── Reference data (tables, lists) ──────────────────────────────────
     const columns = [
         { col: "RT",        type: "number", desc: "Retention time of the chromatographic peak",              ex: "2.345" },
-        { col: "Base Peak", type: "number", desc: "m/z of the dominant ion in the mass spectrum",            ex: "195.08" },
+        { col: "Base Peak", type: "number", desc: "(Optional) m/z of the dominant ion in the mass spectrum. Absence of this column activates RT-only mode (GC-FID, LC-UV).", ex: "195.08" },
         { col: "Polarity",  type: "string", desc: "Ionization polarity: positive / negative",                ex: "positive" },
         { col: "File",      type: "string", desc: "Source file name used to assign replicate buckets",       ex: "1_pos.d" },
         { col: "Area",      type: "number", desc: "Peak area proportional to analyte abundance",             ex: "1250000" },
@@ -152,9 +165,11 @@
         { name: "replicate_mz_tol",   def: "0.3",  unit: "Da / ppm", used: "Replicate clustering" },
         { name: "blank_rt_tol",       def: "0.1",  unit: "min",     used: "Blank subtraction" },
         { name: "blank_mz_tol",       def: "0.3",  unit: "Da / ppm", used: "Blank subtraction" },
-        { name: "signal_to_blank_min",def: "3.0",  unit: "ratio",   used: "Artifact / Real Compound decision" },
+        { name: "signal_to_blank_min",   def: "3.0",  unit: "ratio",   used: "Artifact / Real Compound decision" },
+        { name: "min_area_difference",    def: "—",    unit: "counts",  used: "(Optional) absolute AreaDiff floor; Artifact if area_sample−area_blank < threshold" },
         { name: "cv_high_max",        def: "15",   unit: "%",       used: "ReplicateQuality = High" },
         { name: "cv_moderate_max",    def: "30",   unit: "%",       used: "ReplicateQuality = Moderate" },
+        { name: "mz_available",       def: "true", unit: "bool",    used: "Auto-detected: false for RT-only datasets (no Base Peak column)" },
     ];
 
     const glossary = [

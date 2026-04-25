@@ -70,7 +70,7 @@
             short: "Підтвердження піків",
             tone: "blue",
             summary: "Піки одного зразка, але з різних вимірювань, об'єднуються в групи. Ми перевіряємо, що та сама сполука присутня в кількох незалежних вимірах.",
-            deepDive: "Жадібна кластеризація: пік із найбільшою площею стає зерном. Із кожного іншого кошика реплікатів вибирається найближчий пік у просторі (RT + m/z). Якщо збіги знайдено щонайменше у 2 кошиках, кластер підтверджується.",
+            deepDive: "Жадібна кластеризація: пік із найбільшою площею стає зерном. Із кожного іншого кошика реплікатів вибирається найближчий пік у просторі (RT + m/z). Якщо збіги знайдено щонайменше у 2 кошиках, кластер підтверджується. Алгоритм також підтримує режим RT-only (GC-FID, LC-UV та інші прилади без мас-спектрометра): якщо в наборі даних відсутня колонка «Base Peak», кластеризація та blank subtraction виконуються лише за RT, а штраф confidence score за відсутність m/z не застосовується.",
             input: ["Піки в кошиках реплікатів"],
             action: ["Сортувати за спаданням Area", "Усереднювати центроїд при додаванні", "Перевіряти вікна допуску"],
             output: ["Підтверджені кластери"],
@@ -89,6 +89,19 @@
             output: ["Пари Sample ↔ Blank з ratio"],
             formula: "Ratio (S/B) = mean(Area_sample) / mean(Area_blank)",
             formulaExplanation: "Середня площа в зразку ділиться на середню площу в blank. Усереднення захищає від випадкових сплесків."
+        },
+        {
+            id: "parallel_merge",
+            title: "Злиття паралельних проб",
+            short: "sample_1 ∩ sample_2",
+            tone: "indigo",
+            summary: "Підтверджені sample-кластери з різних паралельних проб (sample_1, sample_2 …) зводяться в єдиний рядок. Blank-статус кожної проби вже відомий до злиття.",
+            deepDive: "Злиття зважене за кількістю реплікатів. Якщо лише одна проба мала blank match, blank_area_mean агрегується тільки по ній. S/B ratio і статус перераховуються на агрегованому рівні, тому одна шумна проба не псує висновок.",
+            input: ["Per-sample кластери зі статусом blank subtraction"],
+            action: ["Жадібна кластеризація між пробами (RT + m/z)", "Зважене усереднення (area, RT, mz)", "Агрегація blank_area_mean по джерелах із match", "Перерахунок S/B і confidence_score"],
+            output: ["Merged ConfirmedRow з Why.BlankSubtraction.PerSource[]"],
+            formula: "S/B_merged = Area_merged / blank_area_mean_weighted",
+            formulaExplanation: "Агрегований blank_area_mean рахується зваженим середнім тільки по тих джерелах, що мали blank match. Проба без match не занижує знаменник і не маскує реальний сигнал."
         },
         {
             id: "decision",
@@ -120,8 +133,8 @@
 
     // ── Reference data (tables, lists) ──────────────────────────────────
     const columns = [
-        { col: "RT",        type: "number", desc: "Час утримання хроматографічного піка",                    ex: "2.345" },
-        { col: "Base Peak", type: "number", desc: "m/z домінуючого іона в мас-спектрі",                      ex: "195.08" },
+        { col: "RT",        type: "number", desc: "Час утримання хроматографічного піка",                                                                ex: "2.345" },
+        { col: "Base Peak", type: "number", desc: "(Опційно) m/z домінуючого іона в мас-спектрі. Відсутність колонки активує режим RT-only (GC-FID, LC-UV).", ex: "195.08" },
         { col: "Polarity",  type: "string", desc: "Полярність іонізації: positive / negative",               ex: "positive" },
         { col: "File",      type: "string", desc: "Ім'я файлу, що використовується для призначення реплік", ex: "1_pos.d" },
         { col: "Area",      type: "number", desc: "Площа піка, пропорційна вмісту аналіту",                  ex: "1250000" },
@@ -152,9 +165,11 @@
         { name: "replicate_mz_tol",   def: "0.3",  unit: "Da / ppm", used: "Кластеризація реплікатів" },
         { name: "blank_rt_tol",       def: "0.1",  unit: "хв",      used: "Blank subtraction" },
         { name: "blank_mz_tol",       def: "0.3",  unit: "Da / ppm", used: "Blank subtraction" },
-        { name: "signal_to_blank_min",def: "3.0",  unit: "ratio",   used: "Рішення Artifact / Real Compound" },
+        { name: "signal_to_blank_min",   def: "3.0",  unit: "ratio",   used: "Рішення Artifact / Real Compound" },
+        { name: "min_area_difference",    def: "—",    unit: "counts",  used: "(Опційно) абсолютний поріг AreaDiff; Artifact якщо area_sample−area_blank < порогу" },
         { name: "cv_high_max",        def: "15",   unit: "%",       used: "ReplicateQuality = High" },
         { name: "cv_moderate_max",    def: "30",   unit: "%",       used: "ReplicateQuality = Moderate" },
+        { name: "mz_available",       def: "true", unit: "bool",    used: "Автовизначається: false для RT-only наборів даних (без колонки Base Peak)" },
     ];
 
     const glossary = [

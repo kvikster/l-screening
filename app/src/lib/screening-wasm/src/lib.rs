@@ -20,6 +20,7 @@ fn mark_to_stype(mark: &str) -> Option<&'static str> {
     match mark {
         "blank_positive" | "blank_negative" => Some("blank"),
         "sample_rep1" | "sample_rep2" => Some("sample"),
+        "surrogate" | "surrogate_positive" | "surrogate_negative" => Some("surrogate"),
         _ => None,
     }
 }
@@ -275,6 +276,87 @@ fn merge_parallel_cluster(
     }
     .to_string();
 
+    // ── Aggregate per-source blank-subtraction results ────────────────────
+    // Each member already went through `apply_blank_result` before merge, so
+    // its blank_area_mean / signal_to_blank_ratio / status reflect a real,
+    // per-sample blank match. We aggregate by replicate-count weighting over
+    // sources that actually had a blank match; status is re-derived from the
+    // aggregated S/B ratio so the merged row stays consistent with the
+    // configured threshold.
+    let blank_area_inputs: Vec<(Option<f64>, usize)> = member_rows
+        .iter()
+        .map(|r| (r.blank_area_mean, r.replicate_count))
+        .collect();
+    let agg_blank_area = weighted_mean(&blank_area_inputs);
+    let sources_with_blank: usize = member_rows
+        .iter()
+        .filter(|r| r.blank_area_mean.is_some())
+        .count();
+    let has_blank_match = sources_with_blank > 0;
+    let agg_signal_to_blank_ratio = match agg_blank_area {
+        Some(b) if b > 0.0 => Some(area_mean / b),
+        _ => None,
+    };
+    let agg_area_difference = agg_blank_area.map(|b| area_mean - b);
+    let agg_status = if !has_blank_match {
+        "Real Compound".to_string()
+    } else {
+        match agg_signal_to_blank_ratio {
+            None => "Artifact".to_string(),
+            Some(r) if r < config.signal_to_blank_min => "Artifact".to_string(),
+            _ => "Real Compound".to_string(),
+        }
+    };
+    let agg_confidence_score = crate::math::final_confidence_score(
+        rep_score,
+        has_blank_match,
+        agg_signal_to_blank_ratio,
+        config,
+    );
+    let total_blank_candidate_count: u64 = member_rows
+        .iter()
+        .map(|r| {
+            r.why
+                .get("BlankCandidateCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+        })
+        .sum();
+    let best_source_blank_detail = member_rows
+        .iter()
+        .filter(|r| r.blank_area_mean.is_some())
+        .min_by(|a, b| {
+            let da = a
+                .why
+                .get("BlankDetail")
+                .and_then(|v| v.get("rt_delta"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(f64::INFINITY);
+            let db = b
+                .why
+                .get("BlankDetail")
+                .and_then(|v| v.get("rt_delta"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(f64::INFINITY);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .and_then(|r| r.why.get("BlankDetail").cloned());
+    let per_source_blank: Vec<Value> = member_rows
+        .iter()
+        .map(|r| {
+            json!({
+                "SampleType": r.sample_type.clone(),
+                "BlankAreaMean": r.blank_area_mean,
+                "AreaDifference": r.area_difference,
+                "SignalToBlankRatio": r.signal_to_blank_ratio,
+                "Status": r.status.clone(),
+                "ConfidenceScore": r.confidence_score,
+                "ReplicateCount": r.replicate_count,
+                "BlankDetail": r.why.get("BlankDetail").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
     let replicate_files: Vec<Option<String>> = member_rows.iter().flat_map(|r| r.replicate_files.clone()).collect();
     let replicate_labels: Vec<Option<String>> = member_rows.iter().flat_map(|r| r.replicate_labels.clone()).collect();
     let replicate_marks: Vec<Option<String>> = member_rows.iter().flat_map(|r| r.replicate_marks.clone()).collect();
@@ -323,6 +405,26 @@ fn merge_parallel_cluster(
             "SourceWhy": member_rows.iter().map(|r| r.why.clone()).collect::<Vec<Value>>(),
         },
         "ReplicateConfidenceScore": rep_score,
+        "BlankSubtraction": {
+            "Policy": "per_source_then_aggregate",
+            "TotalSources": member_rows.len(),
+            "SourcesWithBlankMatch": sources_with_blank,
+            "AggregatedBlankAreaMean": agg_blank_area.map(|v| safe_round(v, 2)),
+            "AggregatedSignalToBlankRatio": agg_signal_to_blank_ratio.map(|v| safe_round(v, 2)),
+            "AggregatedAreaDifference": agg_area_difference.map(|v| safe_round(v, 2)),
+            "Threshold": config.signal_to_blank_min,
+            "Decision": agg_status.clone(),
+            "PerSource": per_source_blank,
+        },
+        "BlankMatch": has_blank_match,
+        "BlankCandidateCount": total_blank_candidate_count,
+        "BlankAreaMean": agg_blank_area.map(|v| safe_round(v, 2)),
+        "AreaDifference": agg_area_difference.map(|v| safe_round(v, 2)),
+        "SignalToBlankRatio": agg_signal_to_blank_ratio.map(|v| safe_round(v, 2)),
+        "SignalToBlankThreshold": config.signal_to_blank_min,
+        "ConfidenceScore": agg_confidence_score,
+        "Decision": agg_status.clone(),
+        "BlankDetail": best_source_blank_detail.unwrap_or(Value::Null),
         "ThresholdProfile": {
             "replicate_rt_tol": config.replicate_rt_tol,
             "replicate_mz_tol": config.replicate_mz_tol,
@@ -343,7 +445,7 @@ fn merge_parallel_cluster(
         replicate_quality,
         replicate_count: total_replicates,
         replicate_confidence_score: rep_score,
-        confidence_score: rep_score,
+        confidence_score: agg_confidence_score,
         polarity: polarity.to_string(),
         sample_type: family.to_string(),
         rep1_label,
@@ -361,11 +463,82 @@ fn merge_parallel_cluster(
         parallel_match: parallel_source_samples.len() > 1,
         parallel_sample_count: parallel_source_samples.len(),
         parallel_source_samples,
-        blank_area_mean: None,
-        area_difference: None,
-        signal_to_blank_ratio: None,
-        status: String::new(),
+        blank_area_mean: agg_blank_area.map(|v| safe_round(v, 2)),
+        area_difference: agg_area_difference.map(|v| safe_round(v, 2)),
+        signal_to_blank_ratio: agg_signal_to_blank_ratio.map(|v| safe_round(v, 2)),
+        status: agg_status,
+        is_surrogate: false,
+        surrogate_recovery_pct: None,
+        surrogate_rt_shift: None,
+        surrogate_pass: None,
         why,
+    }
+}
+
+/// Validate surrogate rows against SurrogateSpec entries in config.
+/// Matches each surrogate ConfirmedRow to the closest configured spec by RT,
+/// then populates surrogate_recovery_pct, surrogate_rt_shift, surrogate_pass, and
+/// extends Why with a SurrogateValidation block.
+fn surrogate_validation_pass(surrogates: &mut [ConfirmedRow], config: &ScreeningConfig) {
+    let default_rt_window = config.replicate_rt_tol * 2.0;
+
+    for row in surrogates.iter_mut() {
+        row.is_surrogate = true;
+
+        let best_spec = config
+            .surrogates
+            .iter()
+            .min_by(|a, b| {
+                let da = (row.rt_mean - a.expected_rt).abs();
+                let db = (row.rt_mean - b.expected_rt).abs();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        if let Some(spec) = best_spec {
+            let rt_shift = row.rt_mean - spec.expected_rt;
+            let recovery_pct = if spec.expected_area > 0.0 {
+                row.area_mean / spec.expected_area * 100.0
+            } else {
+                0.0
+            };
+            let rt_window = spec.rt_window.unwrap_or(default_rt_window);
+            let min_pct = spec.recovery_min_pct.unwrap_or(70.0);
+            let max_pct = spec.recovery_max_pct.unwrap_or(130.0);
+            let pass =
+                recovery_pct >= min_pct && recovery_pct <= max_pct && rt_shift.abs() <= rt_window;
+
+            row.surrogate_recovery_pct = Some(safe_round(recovery_pct, 1));
+            row.surrogate_rt_shift = Some(safe_round(rt_shift, 4));
+            row.surrogate_pass = Some(pass);
+            row.status = if pass {
+                "Surrogate OK".to_string()
+            } else {
+                "Surrogate Failed".to_string()
+            };
+
+            if let Some(why_obj) = row.why.as_object_mut() {
+                why_obj.insert(
+                    "SurrogateValidation".into(),
+                    json!({
+                        "MatchedSpec": spec.name,
+                        "ExpectedRT": spec.expected_rt,
+                        "ExpectedMZ": spec.expected_mz,
+                        "ObservedRT": safe_round(row.rt_mean, 4),
+                        "RTShift": safe_round(rt_shift, 4),
+                        "RTWindow": rt_window,
+                        "ExpectedArea": spec.expected_area,
+                        "ObservedArea": safe_round(row.area_mean, 2),
+                        "RecoveryPct": safe_round(recovery_pct, 1),
+                        "RecoveryMin": min_pct,
+                        "RecoveryMax": max_pct,
+                        "Pass": pass,
+                    }),
+                );
+            }
+        } else {
+            // Row is a surrogate but no spec matched within its RT window.
+            row.status = "Surrogate".to_string();
+        }
     }
 }
 
@@ -500,22 +673,33 @@ fn process_peaks_inner(rows_json: &str, config_json: &str) -> Result<String, Str
         all_confirmed.extend(confirmed);
     }
 
-    // Separate blanks and samples.
+    // Separate blanks, surrogates, and samples.
     let blanks: Vec<_> = all_confirmed
         .iter()
         .filter(|r| r.sample_type == "blank")
         .cloned()
         .collect();
 
-    let sample_confirmed: Vec<_> = all_confirmed
-        .into_iter()
-        .filter(|r| r.sample_type != "blank")
+    let mut surrogate_confirmed: Vec<_> = all_confirmed
+        .iter()
+        .filter(|r| r.sample_type == "surrogate")
+        .cloned()
         .collect();
 
-    let mut final_results = merge_parallel_samples(sample_confirmed, &config);
+    let mut sample_confirmed: Vec<_> = all_confirmed
+        .into_iter()
+        .filter(|r| r.sample_type != "blank" && r.sample_type != "surrogate")
+        .collect();
 
-    // Blank subtraction — update each sample peak in place.
-    for peak in &mut final_results {
+    // Surrogate validation: match each surrogate row to a SurrogateSpec and
+    // compute RT shift, recovery %, and pass/fail.
+    surrogate_validation_pass(&mut surrogate_confirmed, &config);
+
+    // Per-sample blank subtraction BEFORE parallel merge: each source sample-row
+    // is matched against blanks individually so that artifact/real-compound
+    // status is decided at the level of an actual measurement, not on an
+    // already-averaged row that may mask sample-specific contamination.
+    for peak in &mut sample_confirmed {
         let candidates = if blanks.is_empty() {
             vec![]
         } else {
@@ -523,6 +707,12 @@ fn process_peaks_inner(rows_json: &str, config_json: &str) -> Result<String, Str
         };
         apply_blank_result(peak, &blanks, &candidates, &config);
     }
+
+    // Parallel merge across samples — aggregates per-source blank results.
+    let mut final_results = merge_parallel_samples(sample_confirmed, &config);
+
+    // Surrogates are appended to output after validation (not merged with samples).
+    final_results.extend(surrogate_confirmed);
 
     // Build summary per (SampleType, Polarity).
     let mut summaries: Vec<SummaryRow> = Vec::new();

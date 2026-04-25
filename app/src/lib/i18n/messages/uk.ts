@@ -5,6 +5,7 @@ export const ukMessages = {
     themeDark: "Темна",
     appName: "LC-MS Screening",
     methodologyToggle: "Про методологію скринінгу",
+    releaseBaseline: "Стартова версія відліку: {version}",
     updateReady: "Нова версія доступна.",
     reload: "Оновити",
     online: "Online",

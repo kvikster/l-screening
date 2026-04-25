@@ -79,19 +79,21 @@ pub fn apply_blank_result(
 
     let has_blank_match = best.is_some();
 
+    let area_difference = best.map(|cand| peak.area_mean - blanks[cand.blank_row_idx].area_mean);
+
     let status = if has_blank_match {
-        match signal_to_blank_ratio {
-            None => "Artifact",
-            Some(ratio) if ratio < config.signal_to_blank_min => "Artifact",
-            _ => "Real Compound",
-        }
+        let ratio_fail = signal_to_blank_ratio.map_or(true, |r| r < config.signal_to_blank_min);
+        let area_diff_fail = config.min_area_difference
+            .zip(area_difference)
+            .map_or(false, |(min_diff, diff)| diff < min_diff);
+        if ratio_fail || area_diff_fail { "Artifact" } else { "Real Compound" }
     } else {
         "Real Compound"
     };
 
     peak.signal_to_blank_ratio = signal_to_blank_ratio.map(|v| safe_round(v, 2));
     peak.blank_area_mean = best.map(|cand| safe_round(blanks[cand.blank_row_idx].area_mean, 2));
-    peak.area_difference = best.map(|cand| safe_round(peak.area_mean - blanks[cand.blank_row_idx].area_mean, 2));
+    peak.area_difference = area_difference.map(|v| safe_round(v, 2));
     peak.status = status.to_string();
     peak.confidence_score = final_confidence_score(
         peak.replicate_confidence_score,
@@ -109,6 +111,7 @@ pub fn apply_blank_result(
             json!(signal_to_blank_ratio.map(|v| safe_round(v, 2))),
         );
         why_obj.insert("SignalToBlankThreshold".into(), json!(config.signal_to_blank_min));
+        why_obj.insert("MinAreaDifference".into(), json!(config.min_area_difference));
         why_obj.insert("BlankAreaMean".into(), json!(peak.blank_area_mean));
         why_obj.insert("AreaDifference".into(), json!(peak.area_difference));
         why_obj.insert("ConfidenceScore".into(), json!(peak.confidence_score));

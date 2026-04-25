@@ -1,0 +1,127 @@
+# План розвитку алгоритму скринінгу
+
+Базовий аналіз — див. знімок коду на момент створення плану:
+@/Users/vkey/Documents/_/l-screening/app/src/lib/screening-wasm/src/lib.rs
+@/Users/vkey/Documents/_/l-screening/app/src/lib/screening-wasm/src/blank.rs
+@/Users/vkey/Documents/_/l-screening/app/src/lib/screening-wasm/src/cluster.rs
+
+────────────────────────────────────────────────────────────────────────────────
+ПУНКТ 1. Blank-subtraction ПЕРЕД merge паралельних проб   [IN PROGRESS]
+────────────────────────────────────────────────────────────────────────────────
+
+Поточний порядок (process_peaks_inner у lib.rs):
+  1. coarse_screen → ConfirmedRow на (sample_type, polarity)
+  2. розділення blanks / samples
+  3. merge_parallel_samples(samples) → final_results (усереднення між sample_1, sample_2 …)
+  4. blank_candidates + apply_blank_result для кожного merged peak
+
+Проблема: Status (Artifact / Real Compound) призначається на вже усередненому ряді.
+Якщо одна проба чиста, друга має шум на тій же RT — після усереднення це може
+маскуватися або, навпаки, гасити реальний сигнал blank-ом, що збігся лише з однією
+з проб.
+
+Новий порядок:
+  1. coarse_screen
+  2. розділення blanks / samples
+  3. **Per-sample blank subtraction**: для кожної ConfirmedRow з sample-родини
+     обчислюється власний blank match → status, signal_to_blank_ratio,
+     blank_area_mean, area_difference, confidence_score.
+  4. **merge_parallel_samples(samples)**: при злитті агрегуємо нові поля:
+       - blank_area_mean: зважене середнє по replicate_count, тільки серед джерел
+         що мали blank match;
+       - area_difference: area_mean(merged) − blank_area_mean(merged) — або зважене
+         середнє існуючих area_difference (рішення нижче);
+       - signal_to_blank_ratio: area_mean(merged) / blank_area_mean(merged); якщо
+         жоден source не мав blank match → None;
+       - status: переоцінюється з агрегованого S/B vs signal_to_blank_min;
+       - confidence_score: перераховується через final_confidence_score
+         (replicate_score(merged), has_blank_match, ratio).
+     Per-source значення зберігаються у Why.SourceRows для аудиту.
+
+Рішення з трейд-офів:
+  - **Area_difference на merged** = area_mean(merged) − blank_area_mean(merged).
+    Це консистентно з тим, як рахується S/B ratio (через агрегати, не середнє відношень).
+  - **Status агрегованого ряду** виводиться з агрегованого S/B, а не "any Real Compound
+    серед джерел". Це уникає ситуації коли одна шумна проба псує висновок.
+  - **Якщо лише частина джерел мала blank match** (наприклад: sample_1 збігся з blank,
+    sample_2 — ні). Тоді blank_area_mean агрегується тільки по тих джерелах, що мали
+    збіг. Has_blank_match = true якщо хоча б одне джерело мало match.
+
+Кроки реалізації:
+  [ ] 1.1. lib.rs::process_peaks_inner: змінити порядок — blank subtraction до
+           merge_parallel_samples. Це зачіпає coarse_screen output (тип ConfirmedRow
+           вже містить blank-поля, тому перебудова типів не потрібна).
+  [ ] 1.2. merge_parallel_cluster: зчитувати з member_rows значення blank_area_mean,
+           signal_to_blank_ratio, status; агрегувати; повторно класифікувати статус;
+           перерахувати confidence_score.
+  [ ] 1.3. Розширити Why.ParallelMerge новими полями: BlankSubtractionPolicy,
+           SourcesWithBlankMatch, AggregatedBlank{...}, PerSourceStatus[].
+  [ ] 1.4. Оновити tests/test_logic.py та app/src/lib/screening.test.ts для нового
+           порядку і агрегатів. Додати регресійний кейс: 2 проби × 2 репліки, де
+           тільки sample_1 має blank match.
+  [ ] 1.5. Оновити методологію (3 мови × 2 секції):
+              - app/src/lib/components/methodology-panel/MethodologyPanelUk.svelte
+              - app/src/lib/components/methodology-panel/MethodologyPanelEn.svelte
+              - app/src/lib/components/methodology-panel/MethodologyPanelRu.svelte
+              - app/src/lib/components/methodology-page/MethodologyPageUk.svelte
+              - app/src/lib/components/methodology-page/MethodologyPageEn.svelte
+              - app/src/lib/components/methodology-page/MethodologyPageRu.svelte
+              - візуалізатори (MethodologyVisualizer{Uk,En,Ru}.svelte) — переставити
+                етапи, щоб blank-subtraction йшов до merge.
+              - i18n повідомлення (uk.ts / en.ts / ru.ts), якщо є ключі для методології.
+  [ ] 1.6. Збірка: `bun run build:wasm` + перевірка існуючих тестів +
+           ручний прогон на data/Sample EL_281 comp (Raw).xlsx.
+
+────────────────────────────────────────────────────────────────────────────────
+ПУНКТ 2. Sample × Blank → залишати у таблиці з Area_difference   [REALIZED]
+────────────────────────────────────────────────────────────────────────────────
+
+Уже реалізовано: blank.rs::apply_blank_result не видаляє ряди, проставляє
+SignalToBlankRatio, AreaDifference, Status (Artifact / Real Compound).
+Поточний вирішальний критерій — ratio vs signal_to_blank_min (default 3.0).
+
+Відкрите питання: чи додавати поріг по абсолютній AreaDifference (для дуже малих
+сигналів, де ratio може бути нестабільним)?
+
+Дія:
+  [ ] 2.1. Очікує рішення користувача після завершення пункту 1.
+
+────────────────────────────────────────────────────────────────────────────────
+ПУНКТ 3. Робота без Base Peak (RT-only)   [PARTIAL]
+────────────────────────────────────────────────────────────────────────────────
+
+Базова логіка вже падає назад на RT-only через Option<f64> у math.rs::match_metrics.
+
+Кроки:
+  [ ] 3.1. screening.ts: переконатися що відсутність колонки "Base Peak" не призводить
+           до помилки (поточний код має `mzIdx === -1` ⇒ undefined ⇒ null — ОК, але
+           перевірити).
+  [ ] 3.2. math.rs::replicate_confidence_score: умовно знімати штраф −10 за
+           відсутність MZ, якщо ВЕСЬ датасет RT-only (визначити на рівні групи або
+           додати флаг у ScreeningConfig: `mz_available: bool`).
+  [ ] 3.3. UI/методологія: додати позначку, що алгоритм працює і для RT-only приладів
+           (наприклад GC-FID, або LC-UV).
+
+────────────────────────────────────────────────────────────────────────────────
+ПУНКТ 4. Сурогатні стандартні компоненти   [NOT STARTED]
+────────────────────────────────────────────────────────────────────────────────
+
+Потребує дизайн-кроку. Очікує детальніший use-case:
+  - звідки береться список сурогатів (UI-форма / Excel-колонка / окремий конфіг)?
+  - чи мають сурогати ОДНАКОВИЙ список для всіх partition, чи різний?
+  - які конкретні розрахунки треба робити (recovery %, RT shift, авто-tol)?
+
+Ескіз архітектури:
+  - новий operator_mark "surrogate" або bool-флаг is_surrogate у Row;
+  - ScreeningConfig.surrogates: Vec<{name, expected_rt, expected_mz?, rt_window?}>;
+  - pre-screen pass до coarse_screen: знайти сурогати, обчислити RT shift,
+    опційно автокалібрувати replicate_rt_tol;
+  - у вихідних результатах: IsSurrogate=true, не виключати, але UI-фільтр "сховати
+    сурогати" (default ON);
+  - Why.SurrogateValidation: { recovery_pct, rt_shift, pass/fail }.
+
+Дія:
+  [ ] 4.1. Очікує use-case від користувача.
+
+────────────────────────────────────────────────────────────────────────────────
+Status legend: [ ] = todo, [~] = in progress, [x] = done.

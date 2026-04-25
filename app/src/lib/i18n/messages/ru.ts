@@ -5,6 +5,7 @@ export const ruMessages = {
     themeDark: "Тёмная",
     appName: "LC-MS Screening",
     methodologyToggle: "О методологии скрининга",
+    releaseBaseline: "Стартовая версия отсчёта: {version}",
     updateReady: "Доступна новая версия.",
     reload: "Обновить",
     online: "Online",

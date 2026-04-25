@@ -90,6 +90,18 @@ pub struct ConfirmedRow {
     pub signal_to_blank_ratio: Option<f64>,
     #[serde(rename = "Status")]
     pub status: String,
+    /// True when this row matched a SurrogateSpec (operator_mark = "surrogate").
+    #[serde(rename = "IsSurrogate")]
+    pub is_surrogate: bool,
+    /// observed_area / expected_area * 100; None when no spec matched.
+    #[serde(rename = "SurrogateRecoveryPct")]
+    pub surrogate_recovery_pct: Option<f64>,
+    /// observed_rt − expected_rt; None when no spec matched.
+    #[serde(rename = "SurrogateRtShift")]
+    pub surrogate_rt_shift: Option<f64>,
+    /// Recovery in [min, max] AND |rt_shift| ≤ rt_window; None when unmatched.
+    #[serde(rename = "SurrogatePass")]
+    pub surrogate_pass: Option<bool>,
     /// Full audit trail object.
     #[serde(rename = "Why")]
     pub why: Value,

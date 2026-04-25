@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { base } from "$app/paths";
     import { onMount } from "svelte";
     import {
         dictionary,
@@ -51,6 +52,8 @@
     });
     let syncBlankWithReplicate = $state(true);
     let showAdvancedParams = $state(false);
+    const currentVersion = "v0.7.1";
+    const releaseNotesHref = `${base}/releases/v7.1.html`;
 
     $effect(() => {
         if (!syncBlankWithReplicate) return;
@@ -390,6 +393,21 @@
                         </svg>
                         {dict.methodologyToggle}
                     </button>
+                    <a
+                        href={releaseNotesHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+                    >
+                        <span>{t("releaseBaseline", { version: currentVersion })}</span>
+                        <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M14 3h7v7" />
+                            <path d="M10 14 21 3" />
+                            <path d="M21 14v7h-7" />
+                            <path d="M3 10V3h7" />
+                            <path d="M3 21l7-7" />
+                        </svg>
+                    </a>
 
                     <label class="mt-5 block">
                         <span class="sr-only">{dict.chooseFile}</span>

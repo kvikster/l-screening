@@ -20,11 +20,26 @@ _MARK_TO_STYPE = {
     "blank_negative": "blank",
     "sample_rep1": "sample",
     "sample_rep2": "sample",
+    "surrogate": "surrogate",
+    "surrogate_positive": "surrogate",
+    "surrogate_negative": "surrogate",
 }
 
 # Which operator_mark values count as "replicate 1" vs "replicate 2"
 _REP1_MARKS = {"sample_rep1", "blank_positive"}
 _REP2_MARKS = {"sample_rep2", "blank_negative"}
+
+
+@dataclass(frozen=True)
+class SurrogateSpec:
+    """Expected properties of one surrogate standard compound."""
+    name: str
+    expected_rt: float
+    expected_area: float
+    expected_mz: float | None = None
+    rt_window: float | None = None
+    recovery_min_pct: float = 70.0
+    recovery_max_pct: float = 130.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +53,9 @@ class ScreeningConfig:
     signal_to_blank_min: float = DEFAULT_SIGNAL_TO_BLANK_MIN
     cv_high_max: float = DEFAULT_CV_HIGH_MAX
     cv_moderate_max: float = DEFAULT_CV_MODERATE_MAX
+    mz_available: bool = True
+    min_area_difference: float | None = None
+    surrogates: tuple = ()  # tuple[SurrogateSpec, ...]
 
 
 def build_screening_config(overrides: Dict[str, Any] | None = None) -> ScreeningConfig:
@@ -45,7 +63,14 @@ def build_screening_config(overrides: Dict[str, Any] | None = None) -> Screening
         return ScreeningConfig()
 
     values = asdict(ScreeningConfig())
-    values.update({k: v for k, v in overrides.items() if v is not None})
+    # surrogates is handled separately below (complex objects, not simple scalars)
+    values.update({k: v for k, v in overrides.items() if k != "surrogates" and v is not None})
+    raw_surrogates = overrides.get("surrogates") or []
+    values["surrogates"] = tuple(
+        SurrogateSpec(**{k: v for k, v in s.items() if k in SurrogateSpec.__dataclass_fields__})
+        if isinstance(s, dict) else s
+        for s in raw_surrogates
+    )
 
     replicate_mz_mode = str(values["replicate_mz_mode"]).lower().strip()
     blank_mz_mode = str(values["blank_mz_mode"]).lower().strip()
@@ -179,7 +204,7 @@ def _replicate_confidence_score(
     score -= _fraction_of_tol(rt_delta, rt_tol) * 20
     if use_mz and mz_delta_in_mode is not None:
         score -= _fraction_of_tol(mz_delta_in_mode, mz_tol) * 25
-    else:
+    elif config.mz_available:
         score -= 10
 
     if cv_percent is None:
@@ -498,6 +523,8 @@ def _cluster_to_confirmed_row(
         "ParallelSourceSamples": [str(first_row["SampleType"])],
         "BlankAreaMean": None,
         "AreaDifference": None,
+        "SignalToBlankRatio": None,
+        "Status": "",
         "Why": {
             "ReplicateStrategy": "greedy_cluster_with_singleton_carryover",
             "ReplicateBuckets": [member["bucket_name"] for member in members],
@@ -655,6 +682,75 @@ def _blank_candidates(peak: pd.Series | Dict[str, Any], blanks: pd.DataFrame, co
         )
     )
     return candidates
+
+
+def _apply_per_sample_blank_subtraction(
+    peak: Dict[str, Any], blanks: pd.DataFrame, config: ScreeningConfig
+) -> None:
+    candidates: List[Dict[str, Any]] = [] if blanks.empty else _blank_candidates(peak, blanks, config)
+    best = candidates[0] if candidates else None
+    has_blank_match = best is not None
+    blank_area = float(best["blank_row"]["Area_mean"]) if best is not None else None
+    peak_area = float(peak["Area_mean"])
+
+    ratio: float | None = (peak_area / blank_area) if (blank_area is not None and blank_area > 0) else None
+
+    area_diff = (peak_area - blank_area) if blank_area is not None else None
+
+    if not has_blank_match:
+        status = "Real Compound"
+    else:
+        ratio_fail = ratio is None or ratio < config.signal_to_blank_min
+        area_diff_fail = (
+            config.min_area_difference is not None
+            and area_diff is not None
+            and area_diff < config.min_area_difference
+        )
+        status = "Artifact" if (ratio_fail or area_diff_fail) else "Real Compound"
+
+    peak["SignalToBlankRatio"] = _safe_round(ratio, 2)
+    peak["BlankAreaMean"] = _safe_round(blank_area, 2) if best is not None else None
+    peak["AreaDifference"] = _safe_round(area_diff, 2)
+    peak["Status"] = status
+    peak["ConfidenceScore"] = _final_confidence_score(
+        float(peak["ReplicateConfidenceScore"]),
+        has_blank_match=has_blank_match,
+        signal_to_blank_ratio=ratio,
+        config=config,
+    )
+
+    blank_detail: Dict[str, Any] | None = None
+    if best is not None:
+        blank_detail = {
+            "RT": _safe_round(float(best["blank_row"]["RT_mean"]), 4),
+            "MZ": _safe_round(_optional_float(best["blank_row"].get("MZ_mean")), 6),
+            "Area_mean": _safe_round(blank_area, 2),
+            "rt_delta": _safe_round(best["rt_delta"], 4),
+            "mz_delta_da": _safe_round(best.get("mz_delta_da"), 6),
+            "mz_delta_ppm": _safe_round(best.get("mz_delta_ppm"), 2),
+            "matching_mode": "RT+MZ" if best.get("uses_mz") else "RT",
+            "tolerance": {
+                "rt": config.blank_rt_tol,
+                "mz": config.blank_mz_tol,
+                "mz_mode": config.blank_mz_mode,
+            },
+        }
+
+    why: Dict[str, Any] = dict(peak.get("Why") or {})
+    why.update({
+        "BlankMatch": has_blank_match,
+        "BlankCandidateCount": len(candidates),
+        "SignalToBlankRatio": _safe_round(ratio, 2),
+        "SignalToBlankThreshold": config.signal_to_blank_min,
+        "MinAreaDifference": config.min_area_difference,
+        "BlankAreaMean": _safe_round(blank_area, 2) if best is not None else None,
+        "AreaDifference": _safe_round(area_diff, 2),
+        "ConfidenceScore": peak["ConfidenceScore"],
+        "Decision": status,
+    })
+    if blank_detail is not None:
+        why["BlankDetail"] = blank_detail
+    peak["Why"] = why
 
 
 def _final_row_match_to_centroid(
@@ -822,6 +918,137 @@ def _merge_parallel_cluster(
     compact_marks = _compact_list(all_marks)
     compact_colors = _compact_list(all_colors)
 
+    # Aggregate per-source blank subtraction results.
+    sources_with_blank = [
+        (row, int(row.get("ReplicateCount") or 0))
+        for row in rows
+        if row.get("BlankAreaMean") is not None
+    ]
+    sources_with_blank_count = len(sources_with_blank)
+    has_blank_match = sources_with_blank_count > 0
+
+    if has_blank_match:
+        agg_blank_area = _weighted_mean(
+            [float(r["BlankAreaMean"]) for r, _ in sources_with_blank],
+            [cnt for _, cnt in sources_with_blank],
+        ) or 0.0
+        agg_ratio: float | None = area_mean / agg_blank_area if agg_blank_area > 0 else None
+        agg_area_diff: float | None = area_mean - agg_blank_area
+    else:
+        agg_blank_area = None
+        agg_ratio = None
+        agg_area_diff = None
+
+    if not has_blank_match:
+        agg_status = "Real Compound"
+    elif agg_ratio is None or agg_ratio < config.signal_to_blank_min:
+        agg_status = "Artifact"
+    else:
+        agg_status = "Real Compound"
+
+    agg_confidence = _final_confidence_score(
+        replicate_score,
+        has_blank_match=has_blank_match,
+        signal_to_blank_ratio=agg_ratio,
+        config=config,
+    )
+
+    per_source_blank = [
+        {
+            "SampleType": row.get("SampleType"),
+            "BlankAreaMean": row.get("BlankAreaMean"),
+            "AreaDifference": row.get("AreaDifference"),
+            "SignalToBlankRatio": row.get("SignalToBlankRatio"),
+            "Status": row.get("Status", ""),
+            "ConfidenceScore": row.get("ConfidenceScore"),
+            "ReplicateCount": row.get("ReplicateCount"),
+        }
+        for row in rows
+    ]
+
+    best_blank_detail: Dict[str, Any] | None = None
+    best_rt_delta = float("inf")
+    total_blank_candidates = 0
+    for row in rows:
+        why_row = row.get("Why") or {}
+        total_blank_candidates += int(why_row.get("BlankCandidateCount") or 0)
+        bd = why_row.get("BlankDetail")
+        if bd and has_blank_match:
+            delta = abs(float(bd.get("rt_delta") or float("inf")))
+            if delta < best_rt_delta:
+                best_rt_delta = delta
+                best_blank_detail = bd
+
+    why_dict: Dict[str, Any] = {
+        "ParallelMerge": {
+            "Strategy": "greedy_cluster_union",
+            "SourceSamples": source_sample_types,
+            "ParallelSampleCount": len(source_sample_types),
+            "MatchedAcrossSamples": len(source_sample_types) > 1,
+            "MatchingMode": matching_mode,
+            "RT": {
+                "mean": _safe_round(rt_mean, 4),
+                "max_delta": _safe_round(pairwise_metrics["max_rt_delta"], 4),
+                "tolerance": config.replicate_rt_tol,
+            },
+            "MZ": {
+                "mean": _safe_round(mz_mean, 6),
+                "max_delta_da": _safe_round(pairwise_metrics["max_mz_delta_da"], 6),
+                "max_delta_ppm": _safe_round(pairwise_metrics["max_mz_delta_ppm"], 2),
+                "tolerance": config.replicate_mz_tol,
+                "mode": config.replicate_mz_mode,
+                "used": pairwise_metrics["uses_mz"],
+            },
+            "Area": {
+                "values": [_safe_round(value, 2) for value in replicate_area_values],
+                "mean": _safe_round(area_mean, 2),
+            },
+            "SourceRows": [
+                {
+                    "SampleType": row.get("SampleType"),
+                    "RT_mean": _safe_round(row.get("RT_mean"), 4),
+                    "MZ_mean": _safe_round(_optional_float(row.get("MZ_mean")), 6),
+                    "Area_mean": _safe_round(row.get("Area_mean"), 2),
+                    "ReplicateCount": row.get("ReplicateCount"),
+                    "MatchingMode": row.get("MatchingMode"),
+                }
+                for row in rows
+            ],
+            "SourceWhy": [row.get("Why") for row in rows],
+        },
+        "ReplicateConfidenceScore": replicate_score,
+        "BlankSubtraction": {
+            "Policy": "per_source_then_aggregate",
+            "TotalSources": len(rows),
+            "SourcesWithBlankMatch": sources_with_blank_count,
+            "AggregatedBlankAreaMean": _safe_round(agg_blank_area, 2) if has_blank_match else None,
+            "AggregatedSignalToBlankRatio": _safe_round(agg_ratio, 2),
+            "AggregatedAreaDifference": _safe_round(agg_area_diff, 2),
+            "Threshold": config.signal_to_blank_min,
+            "Decision": agg_status,
+            "PerSource": per_source_blank,
+        },
+        "BlankMatch": has_blank_match,
+        "BlankCandidateCount": total_blank_candidates,
+        "BlankAreaMean": _safe_round(agg_blank_area, 2) if has_blank_match else None,
+        "AreaDifference": _safe_round(agg_area_diff, 2),
+        "SignalToBlankRatio": _safe_round(agg_ratio, 2),
+        "SignalToBlankThreshold": config.signal_to_blank_min,
+        "ConfidenceScore": agg_confidence,
+        "Decision": agg_status,
+        "ThresholdProfile": {
+            "replicate_rt_tol": config.replicate_rt_tol,
+            "replicate_mz_tol": config.replicate_mz_tol,
+            "replicate_mz_mode": config.replicate_mz_mode,
+            "blank_rt_tol": config.blank_rt_tol,
+            "blank_mz_tol": config.blank_mz_tol,
+            "blank_mz_mode": config.blank_mz_mode,
+            "signal_to_blank_min": config.signal_to_blank_min,
+        },
+    }
+    if best_blank_detail is not None:
+        why_dict["BlankDetail"] = best_blank_detail
+
     return {
         "Group": f"{family}_{polarity}",
         "RT_mean": _safe_round(rt_mean, 4),
@@ -831,7 +1058,7 @@ def _merge_parallel_cluster(
         "ReplicateQuality": replicate_quality,
         "ReplicateCount": total_replicates,
         "ReplicateConfidenceScore": replicate_score,
-        "ConfidenceScore": replicate_score,
+        "ConfidenceScore": agg_confidence,
         "Polarity": polarity,
         "SampleType": family,
         "Rep1_Label": compact_labels[0] if len(compact_labels) > 0 else None,
@@ -849,56 +1076,11 @@ def _merge_parallel_cluster(
         "ParallelMatch": len(source_sample_types) > 1,
         "ParallelSampleCount": len(source_sample_types),
         "ParallelSourceSamples": source_sample_types,
-        "BlankAreaMean": None,
-        "AreaDifference": None,
-        "Why": {
-            "ParallelMerge": {
-                "Strategy": "greedy_cluster_union",
-                "SourceSamples": source_sample_types,
-                "ParallelSampleCount": len(source_sample_types),
-                "MatchedAcrossSamples": len(source_sample_types) > 1,
-                "MatchingMode": matching_mode,
-                "RT": {
-                    "mean": _safe_round(rt_mean, 4),
-                    "max_delta": _safe_round(pairwise_metrics["max_rt_delta"], 4),
-                    "tolerance": config.replicate_rt_tol,
-                },
-                "MZ": {
-                    "mean": _safe_round(mz_mean, 6),
-                    "max_delta_da": _safe_round(pairwise_metrics["max_mz_delta_da"], 6),
-                    "max_delta_ppm": _safe_round(pairwise_metrics["max_mz_delta_ppm"], 2),
-                    "tolerance": config.replicate_mz_tol,
-                    "mode": config.replicate_mz_mode,
-                    "used": pairwise_metrics["uses_mz"],
-                },
-                "Area": {
-                    "values": [_safe_round(value, 2) for value in replicate_area_values],
-                    "mean": _safe_round(area_mean, 2),
-                },
-                "SourceRows": [
-                    {
-                        "SampleType": row.get("SampleType"),
-                        "RT_mean": _safe_round(row.get("RT_mean"), 4),
-                        "MZ_mean": _safe_round(_optional_float(row.get("MZ_mean")), 6),
-                        "Area_mean": _safe_round(row.get("Area_mean"), 2),
-                        "ReplicateCount": row.get("ReplicateCount"),
-                        "MatchingMode": row.get("MatchingMode"),
-                    }
-                    for row in rows
-                ],
-                "SourceWhy": [row.get("Why") for row in rows],
-            },
-            "ReplicateConfidenceScore": replicate_score,
-            "ThresholdProfile": {
-                "replicate_rt_tol": config.replicate_rt_tol,
-                "replicate_mz_tol": config.replicate_mz_tol,
-                "replicate_mz_mode": config.replicate_mz_mode,
-                "blank_rt_tol": config.blank_rt_tol,
-                "blank_mz_tol": config.blank_mz_tol,
-                "blank_mz_mode": config.blank_mz_mode,
-                "signal_to_blank_min": config.signal_to_blank_min,
-            },
-        },
+        "BlankAreaMean": _safe_round(agg_blank_area, 2) if has_blank_match else None,
+        "AreaDifference": _safe_round(agg_area_diff, 2),
+        "SignalToBlankRatio": _safe_round(agg_ratio, 2),
+        "Status": agg_status,
+        "Why": why_dict,
     }
 
 
@@ -995,6 +1177,61 @@ def _parallel_merge_samples(samples: List[Dict[str, Any]], config: ScreeningConf
     return merged
 
 
+def _surrogate_validation_pass(
+    surrogate_rows: List[Dict[str, Any]], config: ScreeningConfig
+) -> None:
+    """Validate surrogate rows in-place against SurrogateSpec entries in config.
+
+    Matches each row to the closest spec by RT proximity, then populates
+    IsSurrogate, SurrogateRecoveryPct, SurrogateRtShift,
+    SurrogatePass, Status, and Why.SurrogateValidation.
+    """
+    default_rt_window = config.replicate_rt_tol * 2.0
+
+    for row in surrogate_rows:
+        row["IsSurrogate"] = True
+        rt_mean = float(row.get("RT_mean") or 0.0)
+        area_mean = float(row.get("Area_mean") or 0.0)
+
+        # Choose the closest configured spec, then let pass/fail reflect the RT window.
+        best = min(config.surrogates, key=lambda s: abs(rt_mean - s.expected_rt), default=None)
+
+        if best is not None:
+            rt_shift = rt_mean - best.expected_rt
+            recovery_pct = (area_mean / best.expected_area * 100.0) if best.expected_area > 0 else 0.0
+            rt_window = best.rt_window or default_rt_window
+            min_pct = best.recovery_min_pct
+            max_pct = best.recovery_max_pct
+            passed = (min_pct <= recovery_pct <= max_pct) and (abs(rt_shift) <= rt_window)
+
+            row["SurrogateRecoveryPct"] = _safe_round(recovery_pct, 1)
+            row["SurrogateRtShift"] = _safe_round(rt_shift, 4)
+            row["SurrogatePass"] = passed
+            row["Status"] = "Surrogate OK" if passed else "Surrogate Failed"
+
+            why = row.get("Why") or {}
+            why["SurrogateValidation"] = {
+                "MatchedSpec": best.name,
+                "ExpectedRT": best.expected_rt,
+                "ExpectedMZ": best.expected_mz,
+                "ObservedRT": _safe_round(rt_mean, 4),
+                "RTShift": _safe_round(rt_shift, 4),
+                "RTWindow": rt_window,
+                "ExpectedArea": best.expected_area,
+                "ObservedArea": _safe_round(area_mean, 2),
+                "RecoveryPct": _safe_round(recovery_pct, 1),
+                "RecoveryMin": min_pct,
+                "RecoveryMax": max_pct,
+                "Pass": passed,
+            }
+            row["Why"] = why
+        else:
+            row["SurrogateRecoveryPct"] = None
+            row["SurrogateRtShift"] = None
+            row["SurrogatePass"] = None
+            row["Status"] = "Surrogate"
+
+
 def process_peaks(
     df: pd.DataFrame, config: ScreeningConfig | Dict[str, Any] | None = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[Dict[str, Any]]]:
@@ -1035,67 +1272,33 @@ def process_peaks(
     coarse_df = pd.concat(coarse_rows, ignore_index=True) if coarse_rows else pd.DataFrame()
 
     blanks = coarse_df[coarse_df["SampleType"] == "blank"].copy() if not coarse_df.empty else pd.DataFrame()
+    surrogate_rows: List[Dict[str, Any]] = (
+        coarse_df[coarse_df["SampleType"] == "surrogate"].to_dict(orient="records")
+        if not coarse_df.empty
+        else []
+    )
     sample_rows = (
-        coarse_df[coarse_df["SampleType"] != "blank"].to_dict(orient="records") if not coarse_df.empty else []
+        coarse_df[
+            (coarse_df["SampleType"] != "blank") & (coarse_df["SampleType"] != "surrogate")
+        ].to_dict(orient="records")
+        if not coarse_df.empty
+        else []
     )
 
-    merged_samples = _parallel_merge_samples(sample_rows, config)
+    # Surrogate validation: match each surrogate row to a SurrogateSpec and
+    # compute RT shift, recovery %, and pass/fail.
+    _surrogate_validation_pass(surrogate_rows, config)
 
-    final_results: List[Dict[str, Any]] = []
-    for peak in merged_samples:
-        candidates = _blank_candidates(peak, blanks, config) if not blanks.empty else []
-        best_blank = candidates[0] if candidates else None
+    # Per-sample blank subtraction BEFORE parallel merge: each source sample-row
+    # is matched against blanks individually so that artifact/real-compound
+    # status is decided at the level of an actual measurement, not on an
+    # already-averaged row that may mask sample-specific contamination.
+    for peak in sample_rows:
+        _apply_per_sample_blank_subtraction(peak, blanks, config)
 
-        signal_to_blank_ratio = None
-        blank_area_mean = None
-        area_difference = None
-        if best_blank:
-            blank_area_mean = float(best_blank["blank_row"].get("Area_mean") or 0)
-            area_difference = float(peak["Area_mean"]) - blank_area_mean
-            signal_to_blank_ratio = None if blank_area_mean <= 0 else float(peak["Area_mean"]) / blank_area_mean
-
-        status = "Real Compound"
-        if best_blank and signal_to_blank_ratio is not None and signal_to_blank_ratio < config.signal_to_blank_min:
-            status = "Artifact"
-        elif best_blank and signal_to_blank_ratio is None:
-            status = "Artifact"
-
-        row = dict(peak)
-        row["SignalToBlankRatio"] = _safe_round(signal_to_blank_ratio, 2)
-        row["BlankAreaMean"] = _safe_round(blank_area_mean, 2)
-        row["AreaDifference"] = _safe_round(area_difference, 2)
-        row["ConfidenceScore"] = _final_confidence_score(
-            replicate_score=float(peak["ReplicateConfidenceScore"]),
-            has_blank_match=bool(best_blank),
-            signal_to_blank_ratio=signal_to_blank_ratio,
-            config=config,
-        )
-        row["Status"] = status
-        row.setdefault("Why", {})
-        row["Why"]["BlankMatch"] = bool(best_blank)
-        row["Why"]["BlankCandidateCount"] = len(candidates)
-        row["Why"]["SignalToBlankRatio"] = _safe_round(signal_to_blank_ratio, 2)
-        row["Why"]["SignalToBlankThreshold"] = config.signal_to_blank_min
-        row["Why"]["BlankAreaMean"] = _safe_round(blank_area_mean, 2)
-        row["Why"]["AreaDifference"] = _safe_round(area_difference, 2)
-        row["Why"]["ConfidenceScore"] = row["ConfidenceScore"]
-        row["Why"]["Decision"] = status
-        if best_blank:
-            row["Why"]["BlankDetail"] = {
-                "RT": _safe_round(best_blank["blank_row"]["RT_mean"], 4),
-                "MZ": _safe_round(_optional_float(best_blank["blank_row"].get("MZ_mean")), 6),
-                "Area_mean": _safe_round(best_blank["blank_row"].get("Area_mean"), 2),
-                "rt_delta": _safe_round(best_blank["rt_delta"], 4),
-                "mz_delta_da": _safe_round(best_blank["mz_delta_da"], 6),
-                "mz_delta_ppm": _safe_round(best_blank["mz_delta_ppm"], 2),
-                "matching_mode": "RT+MZ" if best_blank["uses_mz"] else "RT",
-                "tolerance": {
-                    "rt": config.blank_rt_tol,
-                    "mz": config.blank_mz_tol,
-                    "mz_mode": config.blank_mz_mode,
-                },
-            }
-        final_results.append(row)
+    merged_results = _parallel_merge_samples(sample_rows, config)
+    # Surrogates appended after validation (not merged with samples).
+    final_results = merged_results + surrogate_rows
 
     summary = []
     for (stype, pol), grp in df.groupby(["SummarySampleType", "Polarity"]):

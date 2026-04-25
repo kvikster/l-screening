@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import * as XLSX from "xlsx";
 
 const inferPolarityFromFile = (filename: string): string => {
@@ -85,5 +85,146 @@ describe("REQUIRED_COLS", () => {
   it("contains RT, File, Area", () => {
     const REQUIRED_COLS = ["RT", "File", "Area"];
     expect(REQUIRED_COLS).toEqual(["RT", "File", "Area"]);
+  });
+});
+
+// ── WASM integration: partial blank match ────────────────────────────────────
+// Regression: blank at RT≈1.95 matches sample_1 (delta=0.05) but not sample_2
+// (delta=0.13 > 0.1 default tolerance). After parallel merge SourcesWithBlankMatch==1.
+
+describe("WASM partial blank match", () => {
+  let processPeaks: (rows: string, config: string) => string;
+
+  beforeAll(async () => {
+    const { readFileSync } = await import("fs");
+    const { fileURLToPath } = await import("url");
+    const { dirname, resolve } = await import("path");
+    const { initSync, process_peaks } = await import("./wasm-pkg/screening_wasm.js");
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const wasmBuf = readFileSync(resolve(__dir, "wasm-pkg", "screening_wasm_bg.wasm"));
+    initSync({ module: wasmBuf });
+    processPeaks = process_peaks;
+  });
+
+  const rows = [
+    { RT: 1.99, "Base Peak": 150.0, Area: 500.0, Polarity: "+", File: "1_a", Label: "s1a" },
+    { RT: 2.01, "Base Peak": 150.1, Area: 510.0, Polarity: "+", File: "1_b", Label: "s1b" },
+    { RT: 2.07, "Base Peak": 150.0, Area: 480.0, Polarity: "+", File: "2_a", Label: "s2a" },
+    { RT: 2.09, "Base Peak": 150.1, Area: 490.0, Polarity: "+", File: "2_b", Label: "s2b" },
+    { RT: 1.94, "Base Peak": 150.0, Area: 100.0, Polarity: "+", File: "blank_a", Label: "b1" },
+    { RT: 1.96, "Base Peak": 150.1, Area: 110.0, Polarity: "+", File: "blank_b", Label: "b2" },
+  ];
+  const config = JSON.stringify({});
+
+  it("SourcesWithBlankMatch == 1 when only sample_1 has blank within RT tolerance", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), config));
+    const merged = out.results.find((r: { ParallelMatch: boolean }) => r.ParallelMatch);
+    expect(merged).toBeDefined();
+    expect(merged.Why.BlankSubtraction.SourcesWithBlankMatch).toBe(1);
+    expect(merged.Why.BlankSubtraction.TotalSources).toBe(2);
+  });
+
+  it("aggregated BlankAreaMean comes only from sample_1", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), config));
+    const merged = out.results.find((r: { ParallelMatch: boolean }) => r.ParallelMatch);
+    expect(merged.BlankAreaMean).toBeCloseTo(105, 0);
+  });
+
+  it("Status is Real Compound because aggregated S/B > threshold", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), config));
+    const merged = out.results.find((r: { ParallelMatch: boolean }) => r.ParallelMatch);
+    expect(merged.SignalToBlankRatio).toBeGreaterThan(3.0);
+    expect(merged.Status).toBe("Real Compound");
+  });
+});
+
+describe("WASM surrogate validation", () => {
+  let processPeaks: (rows: string, config: string) => string;
+
+  beforeAll(async () => {
+    const { readFileSync } = await import("fs");
+    const { fileURLToPath } = await import("url");
+    const { dirname, resolve } = await import("path");
+    const { initSync, process_peaks } = await import("./wasm-pkg/screening_wasm.js");
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const wasmBuf = readFileSync(resolve(__dir, "wasm-pkg", "screening_wasm_bg.wasm"));
+    initSync({ module: wasmBuf });
+    processPeaks = process_peaks;
+  });
+
+  const rows = (area = 143250, rt = 5.31) => [
+    {
+      RT: rt,
+      "Base Peak": 128.0,
+      Area: area,
+      Polarity: "+",
+      File: "surrogate_a",
+      Label: "d8-Naphthalene",
+      operator_mark: "surrogate",
+    },
+    {
+      RT: rt + 0.01,
+      "Base Peak": 128.1,
+      Area: area * 1.02,
+      Polarity: "+",
+      File: "surrogate_b",
+      Label: "d8-Naphthalene",
+      operator_mark: "surrogate",
+    },
+  ];
+
+  const config = (surrogates = true) =>
+    JSON.stringify(
+      surrogates
+        ? {
+            surrogates: [
+              {
+                name: "d8-Naphthalene",
+                expected_rt: 5.23,
+                expected_area: 150000,
+                expected_mz: 128.0,
+                rt_window: 0.2,
+                recovery_min_pct: 70,
+                recovery_max_pct: 130,
+              },
+            ],
+          }
+        : { surrogates: [] },
+    );
+
+  it("marks matching surrogate rows and emits validation details", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows()), config()));
+    const surrogate = out.results[0];
+    expect(surrogate.IsSurrogate).toBe(true);
+    expect(surrogate.SurrogatePass).toBe(true);
+    expect(surrogate.Status).toBe("Surrogate OK");
+    expect(surrogate.Why.SurrogateValidation.MatchedSpec).toBe("d8-Naphthalene");
+    expect(surrogate.SurrogateRecoveryPct).toBeCloseTo(96.5, 1);
+  });
+
+  it("keeps failing surrogates in output", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows(400000)), config()));
+    const surrogate = out.results[0];
+    expect(surrogate.IsSurrogate).toBe(true);
+    expect(surrogate.SurrogatePass).toBe(false);
+    expect(surrogate.Status).toBe("Surrogate Failed");
+    expect(surrogate.SurrogateRecoveryPct).toBeGreaterThan(130);
+  });
+
+  it("leaves SurrogatePass null when no spec matches", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows()), config(false)));
+    const surrogate = out.results[0];
+    expect(surrogate.IsSurrogate).toBe(true);
+    expect(surrogate.SurrogatePass).toBeNull();
+    expect(surrogate.Status).toBe("Surrogate");
+    expect(surrogate.Why.SurrogateValidation).toBeUndefined();
+  });
+
+  it("fails surrogate on RT drift outside rt_window", () => {
+    const out = JSON.parse(processPeaks(JSON.stringify(rows(143250, 5.45)), config()));
+    const surrogate = out.results[0];
+    expect(surrogate.IsSurrogate).toBe(true);
+    expect(surrogate.SurrogatePass).toBe(false);
+    expect(Math.abs(surrogate.SurrogateRtShift)).toBeGreaterThan(0.2);
   });
 });

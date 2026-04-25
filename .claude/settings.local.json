@@ -15,7 +15,18 @@
       "Bash(git push:*)",
       "Bash(cat /Users/vkey/Documents/l-screening/.github/workflows/*.yml)",
       "Bash(wc -l /Users/vkey/Documents/l-screening/app/src/lib/components/*.svelte /Users/vkey/Documents/l-screening/app/src/lib/components/ui/*.svelte)",
-      "Bash(wc -l /Users/vkey/Documents/l-screening/app/src/lib/components/*.svelte)"
+      "Bash(wc -l /Users/vkey/Documents/l-screening/app/src/lib/components/*.svelte)",
+      "Bash(python -m pytest tests/test_logic.py -v)",
+      "Bash(python3 -m pytest tests/test_logic.py -v)",
+      "Bash(python3.12 -m pytest tests/test_logic.py -v)",
+      "Bash(.venv/bin/pytest tests/test_logic.py -v)",
+      "Bash(cargo test *)",
+      "Bash(/Users/vkey/Documents/_/l-screening/.venv/bin/python3.14 -m pytest /Users/vkey/Documents/_/l-screening/tests/test_logic.py -v)",
+      "Bash(cargo check *)",
+      "Bash(python -c \"from server.python-version.logic import ScreeningConfig, SurrogateSpec, build_screening_config; print\\('import OK'\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'server/python-version'\\); from logic import ScreeningConfig, SurrogateSpec, build_screening_config; print\\('import OK'\\)\")",
+      "Bash(python3 -c \"import sys; sys.path.insert\\(0,'server/python-version'\\); from logic import ScreeningConfig, SurrogateSpec, build_screening_config; c = build_screening_config\\({'surrogates': [{'name': 'TestSurr', 'expected_rt': 5.0, 'expected_area': 100000.0}]}\\); print\\('OK', c.surrogates\\)\")",
+      "Bash(uv run *)"
     ]
   }
 }

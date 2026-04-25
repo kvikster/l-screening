@@ -123,9 +123,13 @@ pub fn replicate_confidence_score(
         // fallback is a defensive guard for correctness in release builds.
         let delta = mz_delta_in_mode.unwrap_or(0.0);
         score -= fraction_of_tol(delta, mz_tol) * 25.0;
-    } else {
+    } else if config.mz_available {
+        // m/z column exists but this specific cluster pair couldn't use it.
         score -= 10.0;
     }
+    // When mz_available=false the whole dataset is RT-only (GC-FID, LC-UV, …).
+    // Absence of m/z is a data-format property, not a per-cluster weakness,
+    // so no penalty is applied.
 
     match cv_percent {
         None => score -= 10.0,

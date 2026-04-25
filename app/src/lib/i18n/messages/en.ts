@@ -5,6 +5,7 @@ export const enMessages = {
     themeDark: "Dark",
     appName: "LC-MS Screening",
     methodologyToggle: "About the screening methodology",
+    releaseBaseline: "Baseline version: {version}",
     updateReady: "A new version is available.",
     reload: "Reload",
     online: "Online",

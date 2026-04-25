@@ -361,7 +361,11 @@ pub fn cluster_to_confirmed_row(
         blank_area_mean: None,
         area_difference: None,
         signal_to_blank_ratio: None,
-        status: String::new(), // filled by blank subtraction
+        status: String::new(), // filled by blank subtraction or surrogate_validation_pass
+        is_surrogate: false,
+        surrogate_recovery_pct: None,
+        surrogate_rt_shift: None,
+        surrogate_pass: None,
         why,
     }
 }

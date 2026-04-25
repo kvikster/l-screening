@@ -116,6 +116,8 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
   }
   // Optional columns.
   const labelIdx = headers.indexOf("Label");
+  const operatorMarkIdx = headers.indexOf("operator_mark");
+  const operatorColorIdx = headers.indexOf("operator_color");
 
   const rows: ParsedRow[] = [];
 
@@ -124,7 +126,7 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
     const firstCell = ws[XLSX.utils.encode_cell({ r, c: range.s.c })];
     const fillRgb =
       firstCell?.s?.fgColor?.rgb ?? firstCell?.s?.bgColor?.rgb ?? undefined;
-    const { operator_color, operator_mark } = resolveOperatorMark(fillRgb);
+    const colorMark = resolveOperatorMark(fillRgb);
 
     const get = (col: string): XLSX.CellObject | undefined =>
       colIdx[col] !== undefined
@@ -155,7 +157,19 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
       labelIdx !== -1
         ? ws[XLSX.utils.encode_cell({ r, c: labelIdx })]
         : undefined;
+    const operatorMarkCell =
+      operatorMarkIdx !== -1
+        ? ws[XLSX.utils.encode_cell({ r, c: operatorMarkIdx })]
+        : undefined;
+    const operatorColorCell =
+      operatorColorIdx !== -1
+        ? ws[XLSX.utils.encode_cell({ r, c: operatorColorIdx })]
+        : undefined;
     const label = labelCell?.v != null ? String(labelCell.v) : null;
+    const explicitOperatorMark =
+      operatorMarkCell?.v != null ? String(operatorMarkCell.v).trim() : null;
+    const explicitOperatorColor =
+      operatorColorCell?.v != null ? String(operatorColorCell.v).trim() : null;
 
     rows.push({
       RT: rt,
@@ -164,8 +178,8 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
       Polarity: polarity,
       File: file,
       Label: label,
-      operator_color,
-      operator_mark,
+      operator_color: explicitOperatorColor || colorMark.operator_color,
+      operator_mark: explicitOperatorMark || colorMark.operator_mark,
     });
   }
 
@@ -236,6 +250,30 @@ export interface ScreeningParams {
   signal_to_blank_min: number;
   cv_high_max?: number;
   cv_moderate_max?: number;
+  /** Automatically set to false when the dataset has no Base Peak column (RT-only instruments). */
+  mz_available?: boolean;
+  /**
+   * Optional minimum absolute area difference (area_sample − area_blank).
+   * When set, a peak is classified as Artifact if area_difference < this value
+   * even when the S/B ratio passes the threshold — guards against unstable ratios
+   * on very small signals close to the noise floor.
+   */
+  min_area_difference?: number;
+  /**
+   * Surrogate standard specifications. When non-empty, rows with
+   * operator_mark = "surrogate" are validated against these specs.
+   */
+  surrogates?: SurrogateSpec[];
+}
+
+export interface SurrogateSpec {
+  name: string;
+  expected_rt: number;
+  expected_area: number;
+  expected_mz?: number;
+  rt_window?: number;
+  recovery_min_pct?: number;
+  recovery_max_pct?: number;
 }
 
 export interface ScreeningResult {
@@ -263,9 +301,19 @@ export async function screenFile(
 
   const wasm = await getWasm();
 
+  // Auto-detect RT-only datasets: if no row has a finite Base Peak value,
+  // the dataset comes from an instrument without m/z (GC-FID, LC-UV, …).
+  // Pass mz_available=false so the confidence scoring skips the MZ penalty.
+  const hasMz = rawRows.some(
+    (r) => r["Base Peak"] != null && isFinite(r["Base Peak"] as number),
+  );
+  const effectiveParams: ScreeningParams = hasMz
+    ? params
+    : { ...params, mz_available: false };
+
   const resultJson = wasm.process_peaks(
     JSON.stringify(rawRows),
-    JSON.stringify(params),
+    JSON.stringify(effectiveParams),
   );
   const result = JSON.parse(resultJson) as {
     results?: Record<string, unknown>[];
@@ -344,6 +392,10 @@ const PEAK_COLUMNS = [
   "AreaDifference",
   "ConfidenceScore",
   "SignalToBlankRatio",
+  "IsSurrogate",
+  "SurrogateRecoveryPct",
+  "SurrogateRtShift",
+  "SurrogatePass",
   "Rep1_Label",
   "Rep2_Label",
   "Rep1_Mark",
@@ -440,6 +492,7 @@ export async function generateSampleData(format: "xlsx" | "csv" = "xlsx"): Promi
 
   const basePeaks = [120.5, 157.9, 195.2, 238.8, 285.1, 324.9];
   const sampleData: Record<string, unknown>[] = [];
+  const surrogateData: Record<string, unknown>[] = [];
 
   const rtBase = 0.5;
   for (let i = 0; i < 15; i++) {
@@ -481,7 +534,28 @@ export async function generateSampleData(format: "xlsx" | "csv" = "xlsx"): Promi
     });
   }
 
-  const allData = [...sampleData, ...blankData];
+  const surrogateSpecs = [
+    { name: "d8-Naphthalene", rt: 1.18, mz: 136.1, area: 155000, polarity: "Positive" },
+    { name: "d10-Phenanthrene", rt: 2.42, mz: 188.1, area: 182000, polarity: "Positive" },
+    { name: "d4-Benzoic acid", rt: 3.36, mz: 125.0, area: 131000, polarity: "Negative" },
+  ];
+  for (const [index, surrogate] of surrogateSpecs.entries()) {
+    const polaritySuffix = surrogate.polarity === "Negative" ? "_neg" : "";
+    for (let rep = 1; rep <= 2; rep++) {
+      surrogateData.push({
+        RT: Number((surrogate.rt + (rep - 1) * 0.012).toFixed(3)),
+        "Base Peak": Number((surrogate.mz + (rep - 1) * 0.1).toFixed(1)),
+        Area: Math.round(surrogate.area * (0.94 + Math.random() * 0.1)),
+        Polarity: surrogate.polarity,
+        File: `surrogate_${index + 1}${polaritySuffix}_${rep}.d`,
+        Label: `${surrogate.name}: ${surrogate.rt.toFixed(3)} ${surrogate.mz.toFixed(1)}`,
+        operator_mark: "surrogate",
+        operator_color: null,
+      });
+    }
+  }
+
+  const allData = [...sampleData, ...blankData, ...surrogateData];
 
   if (format === "csv") {
     const ws = XLSX.utils.json_to_sheet(allData);
