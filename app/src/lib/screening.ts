@@ -39,7 +39,7 @@ function resolveOperatorMark(argbHex: string | undefined): {
 
 const REQUIRED_COLS = ["RT", "File", "Area"];
 
-interface ParsedRow {
+export interface ParsedRow {
   RT: number;
   "Base Peak": number | null;
   Area: number;
@@ -211,7 +211,7 @@ const PARSERS: FormatParser[] = [
   },
 ];
 
-async function parseFile(file: File): Promise<ParsedRow[]> {
+export async function parseInputFile(file: File): Promise<ParsedRow[]> {
   const parser = PARSERS.find((p) => p.match(file)) ?? PARSERS[PARSERS.length - 1];
   return parser.parse(file);
 }
@@ -221,6 +221,8 @@ async function parseFile(file: File): Promise<ParsedRow[]> {
 let wasmModule: {
   process_peaks: (rows: string, config: string) => string;
 } | null = null;
+
+export type WasmProcessor = (rows: string, config: string) => string;
 
 async function getWasm() {
   if (wasmModule) return wasmModule;
@@ -285,6 +287,12 @@ export interface ScreeningResult {
   rawRows: ParsedRow[];
 }
 
+interface RawScreeningResponse {
+  results?: Record<string, unknown>[];
+  summary?: Record<string, unknown>[];
+  error?: string;
+}
+
 /**
  * Run screening entirely in the browser (WASM path).
  * Returns both a DashboardProps (display-ready, truncated) and the full results.
@@ -293,17 +301,30 @@ export async function screenFile(
   file: File,
   params: ScreeningParams,
 ): Promise<ScreeningResult> {
-  const rawRows = await parseFile(file);
+  const rawRows = await parseInputFile(file);
 
+  return screenRows(rawRows, params, file.name);
+}
+
+export async function screenRows(
+  rawRows: ParsedRow[],
+  params: ScreeningParams,
+  sourceName: string,
+): Promise<ScreeningResult> {
+  const wasm = await getWasm();
+  return screenRowsWithProcessor(rawRows, params, sourceName, wasm.process_peaks);
+}
+
+export function screenRowsWithProcessor(
+  rawRows: ParsedRow[],
+  params: ScreeningParams,
+  sourceName: string,
+  processor: WasmProcessor,
+): ScreeningResult {
   if (rawRows.length === 0) {
     throw new Error(t("noValidRows"));
   }
 
-  const wasm = await getWasm();
-
-  // Auto-detect RT-only datasets: if no row has a finite Base Peak value,
-  // the dataset comes from an instrument without m/z (GC-FID, LC-UV, …).
-  // Pass mz_available=false so the confidence scoring skips the MZ penalty.
   const hasMz = rawRows.some(
     (r) => r["Base Peak"] != null && isFinite(r["Base Peak"] as number),
   );
@@ -311,15 +332,11 @@ export async function screenFile(
     ? params
     : { ...params, mz_available: false };
 
-  const resultJson = wasm.process_peaks(
+  const resultJson = processor(
     JSON.stringify(rawRows),
     JSON.stringify(effectiveParams),
   );
-  const result = JSON.parse(resultJson) as {
-    results?: Record<string, unknown>[];
-    summary?: Record<string, unknown>[];
-    error?: string;
-  };
+  const result = JSON.parse(resultJson) as RawScreeningResponse;
 
   if (result.error) {
     throw new Error(result.error);
@@ -332,8 +349,8 @@ export async function screenFile(
     dashboardProps: buildDashboardProps(
       allPeaks,
       allSummary,
-      params,
-      file.name,
+      effectiveParams,
+      sourceName,
       rawRows.length,
     ),
     allPeaks,
@@ -485,6 +502,57 @@ export async function exportToXlsx(
   XLSX.writeFile(wb, `${stem}_screened.xlsx`);
 }
 
+export async function exportSnapshotToXlsx(
+  result: ScreeningResult,
+  filename: string,
+): Promise<void> {
+  const params =
+    (result.dashboardProps.parameters as ScreeningParams | undefined) ??
+    defaultScreeningParams();
+  await exportToXlsx(result, params, filename);
+}
+
+export function renderOfflineHtmlReport(
+  result: ScreeningResult,
+  filename: string,
+): string {
+  const peaks = result.allPeaks ?? [];
+  const summary = result.allSummary ?? [];
+  const stem = filename.replace(/\.[^.]+$/, "");
+
+  const peaksHtml = peaks
+    .map(
+      (p: any) =>
+        `<tr><td>${p.RT_mean ?? ""}</td><td>${p.MZ_mean ?? ""}</td><td>${p.Area_mean ?? ""}</td><td>${p.Polarity === "positive" ? t("positive") : p.Polarity === "negative" ? t("negative") : p.Polarity ?? ""}</td><td>${p.SampleType ?? ""}</td><td>${p.Status ?? ""}</td><td>${p.ConfidenceScore ?? ""}</td><td>${p.AreaCVPct ?? ""}</td><td>${p.SignalToBlankRatio ?? ""}</td></tr>`,
+    )
+    .join("");
+  const summaryHtml = summary
+    .map(
+      (s: any) =>
+        `<tr><td>${s.Sample ?? ""}</td><td>${s.Polarity === "positive" ? t("positive") : s.Polarity === "negative" ? t("negative") : s.Polarity ?? ""}</td><td>${s.TotalPeaks ?? ""}</td><td>${s.Confirmed ?? ""}</td><td>${s.RealCompounds ?? ""}</td><td>${s.Artifacts ?? ""}</td></tr>`,
+    )
+    .join("");
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${stem} — ${t("appName")}</title>
+<style>body{font-family:system-ui,sans-serif;padding:2rem}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:.4rem .6rem;font-size:.8rem}th{background:#1e40af;color:#fff}tr:nth-child(even){background:#f8fafc}</style>
+</head><body>
+<h1>${t("appName")} — ${stem}</h1>
+<h2>${t("htmlSummary")}</h2><table><tr><th>${t("htmlSample")}</th><th>${t("polarity")}</th><th>${t("htmlTotal")}</th><th>${t("htmlConfirmed")}</th><th>${t("htmlReal")}</th><th>${t("htmlArtifact")}</th></tr>${summaryHtml}</table>
+<h2>${t("htmlScreenedPeaks")}</h2><table><tr><th>RT</th><th>m/z</th><th>${t("areaMean")}</th><th>${t("polarity")}</th><th>${t("htmlSample")}</th><th>${t("htmlStatus")}</th><th>${t("htmlConfidence")}</th><th>CV%</th><th>S/B</th></tr>${peaksHtml}</table>
+</body></html>`;
+}
+
+export function downloadHtmlReport(html: string, filename: string): void {
+  const stem = filename.replace(/\.[^.]+$/, "");
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${stem}_screened_offline.html`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 // ─── Sample data generation ───────────────────────────────────────────────────
 
 export async function generateSampleData(format: "xlsx" | "csv" = "xlsx"): Promise<void> {
@@ -576,6 +644,20 @@ export async function generateSampleData(format: "xlsx" | "csv" = "xlsx"): Promi
 // ─── Server-mode helpers ──────────────────────────────────────────────────────
 
 const SERVER_MODE_KEY = "serverMode";
+
+export function defaultScreeningParams(): ScreeningParams {
+  return {
+    replicate_rt_tol: 0.1,
+    replicate_mz_tol: 0.3,
+    replicate_mz_mode: "da",
+    blank_rt_tol: 0.1,
+    blank_mz_tol: 0.3,
+    blank_mz_mode: "da",
+    signal_to_blank_min: 3,
+    cv_high_max: 15,
+    cv_moderate_max: 30,
+  };
+}
 
 export function isServerMode(): boolean {
   if (typeof localStorage === "undefined") return false;

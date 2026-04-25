@@ -37,6 +37,7 @@
   let onExportHtml = $derived((allProps.onExportHtml as (() => void) | undefined) ?? (() => {}));
   let onUploadNewFile = $derived((allProps.onUploadNewFile as (() => void) | undefined) ?? (() => {}));
   let selectedPeak = $state<any>(null);
+  let auditPanelEl = $state<HTMLElement | null>(null);
   let methodParamsOpen = $state(false);
   let summaryMetricsOpen = $state(false);
   let activeTab = $state<"summary" | "data" | "3d">("data");
@@ -542,6 +543,11 @@
     auditDetailTab = "review";
   }
 
+  $effect(() => {
+    selectedPeak;
+    if (auditPanelEl) auditPanelEl.scrollTop = 0;
+  });
+
   function toneClasses(tone: string) {
     if (tone === "pass") return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300";
     if (tone === "warn") return "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300";
@@ -1012,7 +1018,7 @@
           />
         </div>
 
-        <aside class="min-h-0 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_28%)] p-4 dark:bg-[linear-gradient(180deg,#0f172a_0%,#111827_28%)]">
+        <aside bind:this={auditPanelEl} class="min-h-0 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_28%)] p-4 dark:bg-[linear-gradient(180deg,#0f172a_0%,#111827_28%)]">
           {#if selectedPeak && auditOverview}
             <div class="space-y-4">
               <section class={`rounded-3xl border p-4 shadow-sm ${tonePanelClasses(auditOverview.tone)}`}>

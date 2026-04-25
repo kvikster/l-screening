@@ -292,6 +292,14 @@
     onVisiblePeaksChange(visibleRows);
   }
 
+  function isRowVisible(row: HTMLTableRowElement): boolean {
+    const container = row.closest(".dt-layout-table") as HTMLElement | null;
+    if (!container) return false;
+    const rr = row.getBoundingClientRect();
+    const cr = container.getBoundingClientRect();
+    return rr.top >= cr.top && rr.bottom <= cr.bottom;
+  }
+
   function updateSelectedRowClasses() {
     if (!dt) return;
     const body = tableEl.tBodies.item(0);
@@ -325,7 +333,9 @@
     requestAnimationFrame(() => {
       updateSelectedRowClasses();
       const selectedRow = tableEl.tBodies.item(0)?.querySelector("tr.dt-row-selected") as HTMLTableRowElement | null;
-      selectedRow?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      if (selectedRow && !isRowVisible(selectedRow)) {
+        selectedRow.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
     });
   }
 
