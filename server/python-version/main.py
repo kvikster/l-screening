@@ -944,7 +944,7 @@ async def screen_file(
             _,
             cache_hit,
         ) = _screen_content(content, config_overrides)
-        shown_peaks = min(len(results_list), 100)
+        shown_peaks = min(len(results_list), 1000)
 
         spec = {
             "root": "dashboard-1",
@@ -954,7 +954,7 @@ async def screen_file(
                     "props": {
                         "title": f"Results from {file_name} (Sheet: {best_sheet_name})",
                         "summary": _json_safe(summary_df.to_dict(orient="records")),
-                        "peaks": _json_safe(results_list[:100]),
+                        "peaks": _json_safe(results_list[:1000]),
                         "parameters": _json_safe(resolved_config),
                         "metadata": _json_safe(
                             {

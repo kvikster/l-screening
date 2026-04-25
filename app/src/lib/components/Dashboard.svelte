@@ -98,7 +98,7 @@
       belowThreshold: "нижче порогу",
       matchingCandidates: "кандидатів",
       noBlankDetail: "Деталі blank не знайдено",
-      keyboardHint: "Порада: використовуйте ↑ / ↓ для переходу між піками, ← / → для перемикання tab-ів.",
+      keyboardHint: "",
     },
     en: {
       reviewLabel: "Decision review",
@@ -147,7 +147,7 @@
       belowThreshold: "below threshold",
       matchingCandidates: "candidates",
       noBlankDetail: "No blank details found",
-      keyboardHint: "Tip: use ↑ / ↓ to move between peaks and ← / → to switch tabs.",
+      keyboardHint: "",
     },
     ru: {
       reviewLabel: "Разбор решения",
@@ -196,7 +196,7 @@
       belowThreshold: "ниже порога",
       matchingCandidates: "кандидатов",
       noBlankDetail: "Детали blank не найдены",
-      keyboardHint: "Подсказка: используйте ↑ / ↓ для перехода между пиками, ← / → для переключения tab-ов.",
+      keyboardHint: "",
     },
   } as const;
 

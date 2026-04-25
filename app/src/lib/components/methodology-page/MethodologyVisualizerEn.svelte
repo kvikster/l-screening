@@ -460,7 +460,7 @@
                         {:else if activeStep.id === 'excel'}
                             <div>
                                 <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Input data</h4>
-                                <p><GlossaryRichText text="The system accepts an Excel file (.xlsx / .xls) with LC-MS peak data, automatically selects the most suitable sheet, and expects at least two replicates (separate files or operator marks) plus a blank sample." definitions={glossaryDefinitions} /></p>
+                                <p><GlossaryRichText text="The system accepts Excel (.xlsx / .xls) or CSV/TSV/TXT files with LC-MS peak data, automatically selects the most suitable sheet (for Excel) or parses the first sheet (for CSV), and expects at least two replicates (separate files or operator marks) plus a blank sample." definitions={glossaryDefinitions} /></p>
                             </div>
 
                             <div>

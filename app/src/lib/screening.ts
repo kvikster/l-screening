@@ -35,9 +35,9 @@ function resolveOperatorMark(argbHex: string | undefined): {
   };
 }
 
-// ─── Excel parsing ────────────────────────────────────────────────────────────
+// ─── Tabular parsing ──────────────────────────────────────────────────────────
 
-const REQUIRED_COLS = ["RT", "Polarity", "File", "Area"];
+const REQUIRED_COLS = ["RT", "File", "Area"];
 
 interface ParsedRow {
   RT: number;
@@ -51,8 +51,18 @@ interface ParsedRow {
 }
 
 /**
+ * Infer ionization polarity from a filename when no `Polarity` column exists.
+ * Convention: tokens like `_neg`, `neg_`, `negative` → Negative; otherwise Positive.
+ */
+function inferPolarityFromFile(filename: string): string {
+  return /(?:^|[\W_])neg(?:ative)?(?:[\W_]|$)/i.test(filename)
+    ? "Negative"
+    : "Positive";
+}
+
+/**
  * Select the sheet that has the most required column names.
- * Raises if fewer than 3 required columns are found.
+ * Raises if not all required columns are found.
  */
 function selectBestSheet(wb: XLSX.WorkBook): string {
   let bestName = wb.SheetNames[0];
@@ -75,18 +85,18 @@ function selectBestSheet(wb: XLSX.WorkBook): string {
     }
   }
 
-  if (bestScore < 3) {
+  if (bestScore < REQUIRED_COLS.length) {
     throw new Error(t("noValidSheet", { columns: REQUIRED_COLS.join(", ") }));
   }
   return bestName;
 }
 
 /**
- * Parse an Excel file buffer into an array of row objects.
- * Reads cell fill colors from the first column to assign operator_mark.
+ * Parse a SheetJS workbook into an array of row objects.
+ * Reads cell fill colors from the first column to assign operator_mark
+ * (only meaningful for xlsx; csv/txt have no styles).
  */
-function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
-  const wb = XLSX.read(buffer, { type: "array", cellStyles: true });
+function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
   const sheetName = selectBestSheet(wb);
   const ws = wb.Sheets[sheetName];
 
@@ -135,8 +145,11 @@ function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
     const area = areaCell?.v != null ? Number(areaCell.v) : NaN;
     if (!isFinite(rt) || !isFinite(area)) continue;
 
-    const polarity = polCell?.v != null ? String(polCell.v).trim() : "";
     const file = fileCell?.v != null ? String(fileCell.v).trim() : "";
+    const polarity =
+      polCell?.v != null && String(polCell.v).trim() !== ""
+        ? String(polCell.v).trim()
+        : inferPolarityFromFile(file);
 
     const labelCell =
       labelIdx !== -1
@@ -157,6 +170,36 @@ function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
   }
 
   return rows;
+}
+
+// ─── Format registry ──────────────────────────────────────────────────────────
+
+interface FormatParser {
+  name: string;
+  match: (file: File) => boolean;
+  parse: (file: File) => Promise<ParsedRow[]>;
+}
+
+const PARSERS: FormatParser[] = [
+  {
+    name: "csv",
+    match: (f) => /\.(csv|tsv|txt)$/i.test(f.name),
+    parse: async (f) =>
+      parseWorkbook(XLSX.read(await f.text(), { type: "string" })),
+  },
+  {
+    name: "xlsx",
+    match: (f) => /\.(xlsx|xls)$/i.test(f.name),
+    parse: async (f) =>
+      parseWorkbook(
+        XLSX.read(await f.arrayBuffer(), { type: "array", cellStyles: true }),
+      ),
+  },
+];
+
+async function parseFile(file: File): Promise<ParsedRow[]> {
+  const parser = PARSERS.find((p) => p.match(file)) ?? PARSERS[PARSERS.length - 1];
+  return parser.parse(file);
 }
 
 // ─── WASM lazy loader ─────────────────────────────────────────────────────────
@@ -212,8 +255,7 @@ export async function screenFile(
   file: File,
   params: ScreeningParams,
 ): Promise<ScreeningResult> {
-  const buffer = await file.arrayBuffer();
-  const rawRows = parseExcel(buffer);
+  const rawRows = await parseFile(file);
 
   if (rawRows.length === 0) {
     throw new Error(t("noValidRows"));
@@ -261,7 +303,7 @@ function buildDashboardProps(
   filename: string,
   totalRows: number,
 ): DashboardProps {
-  const displayLimit = 100;
+  const displayLimit = 1000;
   const truncated = peaks.length > displayLimit;
   const displayedPeaks = truncated ? peaks.slice(0, displayLimit) : peaks;
 
@@ -389,6 +431,60 @@ export async function exportToXlsx(
   XLSX.utils.book_append_sheet(wb, rawWs, "Raw Data");
 
   XLSX.writeFile(wb, `${stem}_screened.xlsx`);
+}
+
+// ─── Sample data generation ───────────────────────────────────────────────────
+
+export async function generateSampleData(): Promise<void> {
+  const XLSX = await import("xlsx");
+
+  const basePeaks = [120.5, 157.9, 195.2, 238.8, 285.1, 324.9];
+  const sampleData: Record<string, unknown>[] = [];
+
+  const rtBase = 0.5;
+  for (let i = 0; i < 15; i++) {
+    const rt = rtBase + i * 0.15 + Math.random() * 0.05;
+    const basePeak = basePeaks[i % basePeaks.length] + Math.random() * 2 - 1;
+    const area = 500000 + Math.random() * 2000000;
+
+    const polarity = Math.random() > 0.5 ? "Positive" : "Negative";
+    const polaritySuffix = polarity === "Negative" ? "_neg" : "";
+
+    for (let rep = 1; rep <= 3; rep++) {
+      sampleData.push({
+        RT: Number(rt.toFixed(3)),
+        "Base Peak": Number(basePeak.toFixed(1)),
+        Area: Math.round(area * (0.9 + Math.random() * 0.2)),
+        Polarity: polarity,
+        File: `${i + 1}_sample${polaritySuffix}_${rep}.d`,
+        Label: `Cpd ${i + 1}: ${rt.toFixed(3)} ${basePeak.toFixed(1)}`,
+      });
+    }
+  }
+
+  const blankData: Record<string, unknown>[] = [];
+  for (let i = 0; i < 8; i++) {
+    const rt = rtBase + i * 0.2 + Math.random() * 0.05;
+    const basePeak = basePeaks[i % basePeaks.length] + Math.random() * 2 - 1;
+    const area = 100000 + Math.random() * 300000;
+
+    const polarity = Math.random() > 0.5 ? "Positive" : "Negative";
+    const polaritySuffix = polarity === "Negative" ? "_neg" : "";
+
+    blankData.push({
+      RT: Number(rt.toFixed(3)),
+      "Base Peak": Number(basePeak.toFixed(1)),
+      Area: Math.round(area),
+      Polarity: polarity,
+      File: `blank${polaritySuffix}_${i + 1}.d`,
+      Label: `Blank ${i + 1}: ${rt.toFixed(3)} ${basePeak.toFixed(1)}`,
+    });
+  }
+
+  const ws = XLSX.utils.json_to_sheet([...sampleData, ...blankData]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Data");
+  XLSX.writeFile(wb, "sample_lcms_data.xlsx");
 }
 
 // ─── Server-mode helpers ──────────────────────────────────────────────────────

@@ -463,7 +463,7 @@
                         {:else if activeStep.id === 'excel'}
                             <div>
                                 <h4 class="mb-2 text-sm font-bold text-slate-800 dark:text-slate-200">Входные данные</h4>
-                                <p><GlossaryRichText text="Система принимает Excel-файл (.xlsx / .xls) с LC-MS пиковыми данными, автоматически выбирает наиболее подходящий лист и ожидает как минимум два репликата плюс одну blank-пробу." definitions={glossaryDefinitions} /></p>
+                                <p><GlossaryRichText text="Система принимает Excel (.xlsx / .xls) или CSV/TSV/TXT файлы с LC-MS пиковыми данными, автоматически выбирает наиболее подходящий лист (для Excel) или парсит первый лист (для CSV), и ожидает как минимум два репликата плюс одну blank-пробу." definitions={glossaryDefinitions} /></p>
                             </div>
 
                             <div>
