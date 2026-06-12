@@ -28,8 +28,8 @@
   let activeReport = $state<StoredReport | null>(null);
   let exporting = $state(false);
   let exportingHtml = $state(false);
-  const currentVersion = "v0.8.0";
-  const releaseNotesHref = `${base}/releases/v0.8.0.html`;
+  const currentVersion = "v0.9.0";
+  const releaseNotesHref = `${base}/releases/v0.9.0.html`;
 
   onMount(() => {
     const syncOnlineStatus = () => {
