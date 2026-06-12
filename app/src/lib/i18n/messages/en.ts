@@ -100,7 +100,7 @@ export const enMessages = {
     confirmedPeaks: "Confirmed Peaks",
     displayedPeaks: "Displayed Peaks",
     ofTotal: "of {total} total",
-    meanCv: "Mean CV%",
+    meanCv: "Mean RSD (CV%)",
     meanConfidence: "Mean Confidence",
     qcSummary: "QC Summary",
     qcSummaryDesc:
@@ -138,6 +138,11 @@ export const enMessages = {
     defaultSortNote: "Default sort prioritizes highest confidence",
     areaMean: "Area mean",
     replicates: "Replicates",
+    replicatesChromatograms: "Replicates (chromatograms)",
+    parallelSources: "Sources",
+    rsdCv: "RSD (CV%)",
+    rsdCvHint:
+        "Relative standard deviation of replicate areas — the same quantity historically labeled CV%.",
     marks: "Marks",
     audit: "Audit",
     noColor: "No Color",
@@ -169,6 +174,10 @@ export const enMessages = {
     labspaceReportDeleted: "Report deleted.",
     labspaceLoading: "Loading LabSpace...",
     labspaceLoadFailed: "Failed to load LabSpace state.",
+    labspaceInstrumentProfile: "Instrument profile",
+    labspaceBinWidthHint:
+        "Tip: open a surrogate's audit (BinWidthSuggestion) for max|RT shift|, k·σ and range to guide this value.",
+    labspaceAcceptedFormats: "Accepted: CSV, TSV, TXT, XLSX, XLS",
     labspaceRunEyebrow: "Run",
     labspaceWorkspaceSettings: "Workspace settings",
     labspaceRunTitle: "Lab screening run",

@@ -62,6 +62,10 @@ pub fn apply_blank_result(
     blanks: &[ConfirmedRow],
     candidates: &[BlankCandidate],
     config: &ScreeningConfig,
+    // True when any blank cluster exists in the dataset. Distinguishes a clean
+    // run with no blank at all ("no_blank_loaded") from a blank that was loaded
+    // but had no peak at this position ("blank_clean_here").
+    any_blank_loaded: bool,
 ) {
     use crate::math::final_confidence_score;
     use serde_json::json;
@@ -106,9 +110,22 @@ pub fn apply_blank_result(
         thresholds.signal_to_blank_min,
     );
 
+    // Three-state blank outcome, additive to the existing BlankMatch flag:
+    //   blank_subtracted  — a blank matched this peak and was subtracted
+    //   blank_clean_here  — blanks exist in the set but none matched this peak
+    //   no_blank_loaded   — no blank cluster exists anywhere (clean run)
+    let blank_state = if has_blank_match {
+        "blank_subtracted"
+    } else if any_blank_loaded {
+        "blank_clean_here"
+    } else {
+        "no_blank_loaded"
+    };
+
     // Extend Why with blank subtraction results.
     if let Some(why_obj) = peak.why.as_object_mut() {
         why_obj.insert("BlankMatch".into(), json!(has_blank_match));
+        why_obj.insert("BlankState".into(), json!(blank_state));
         why_obj.insert("BlankCandidateCount".into(), json!(candidates.len()));
         why_obj.insert(
             "SignalToBlankRatio".into(),

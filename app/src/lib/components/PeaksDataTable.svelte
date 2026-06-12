@@ -205,6 +205,31 @@
     return html;
   }
 
+  // Emphasized replicate-count badge with provenance in the tooltip:
+  // source files/samples each replicate came from, and whether the cluster
+  // spans more than one parallel source sample. 1 replicate = 1 chromatogram.
+  function repCountBadge(peak: any): string {
+    const dict = get(dictionary);
+    const count = peak.ReplicateCount || 2;
+    const files: string[] = Array.isArray(peak.ReplicateFiles)
+      ? peak.ReplicateFiles.filter((f: unknown): f is string => !!f)
+      : [];
+    const sources: string[] = Array.isArray(peak.ParallelSourceSamples)
+      ? peak.ParallelSourceSamples.filter((s: unknown): s is string => !!s)
+      : [];
+    const parallel = (peak.ParallelSampleCount || 1) > 1;
+    const originLines: string[] = [];
+    if (files.length) originLines.push(files.join(", "));
+    if (sources.length)
+      originLines.push(`${dict.parallelSources ?? "Sources"}: ${sources.join(", ")}`);
+    const tip = `${count} × ${dict.replicatesChromatograms}${originLines.length ? " — " + originLines.join(" — ") : ""}`;
+    // Multi-source clusters get a ring to flag mixed provenance.
+    const ring = parallel
+      ? "ring-2 ring-amber-400 dark:ring-amber-500/70"
+      : "ring-1 ring-slate-300/60 dark:ring-slate-600/60";
+    return `<span class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 ${ring} dark:bg-blue-950/50 dark:text-blue-200" title="${tip.replace(/"/g, "&quot;")}">n=${count}${parallel ? `<span class="text-[9px] font-semibold text-amber-600 dark:text-amber-400">⛓${sources.length}</span>` : ""}</span>`;
+  }
+
   function buildColumns() {
     const dict = get(dictionary);
     const maxArea = filteredPeaks.reduce((max: number, peak: any) => {
@@ -236,13 +261,12 @@
         },
       },
       {
-        title: dict.replicates,
+        title: dict.replicatesChromatograms,
         data: "ReplicateCount",
-        render: (d: any) =>
-          `<span class="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">n=${d || 2}</span>`,
+        render: (_d: any, _t: any, row: any) => repCountBadge(row),
       },
       {
-        title: "CV%",
+        title: dict.rsdCv ?? "RSD (CV%)",
         data: "AreaCVPct",
         render: (d: any) => `<span class="font-mono ${metricClass("cv", d)}">${fmt(d, 2)}</span>`,
       },
@@ -567,7 +591,7 @@
             <span class="w-6 text-[10px] font-bold text-slate-700 {confidenceMin > 0 ? 'text-blue-600 dark:text-blue-400' : 'dark:text-slate-300'}">{confidenceMin}</span>
           </label>
           <label class="flex items-center gap-1.5">
-            <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400">CV%≤</span>
+            <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400" title={get(dictionary).rsdCvHint}>RSD≤</span>
             <input type="range" min="0" max="100" step="1" bind:value={cvMax} class="dt-slider !w-20" />
             <span class="w-6 text-[10px] font-bold text-slate-700 {cvMax < 100 ? 'text-blue-600 dark:text-blue-400' : 'dark:text-slate-300'}">{cvMax}</span>
           </label>

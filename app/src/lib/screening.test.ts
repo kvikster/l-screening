@@ -228,3 +228,143 @@ describe("WASM surrogate validation", () => {
     expect(Math.abs(surrogate.SurrogateRtShift)).toBeGreaterThan(0.2);
   });
 });
+
+// ── WASM: optional polarity / RT-only ────────────────────────────────────────
+describe("WASM optional dimensions", () => {
+  let processPeaks: (rows: string, config: string) => string;
+
+  beforeAll(async () => {
+    const { readFileSync } = await import("fs");
+    const { fileURLToPath } = await import("url");
+    const { dirname, resolve } = await import("path");
+    const { initSync, process_peaks } = await import("./wasm-pkg/screening_wasm.js");
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const wasmBuf = readFileSync(resolve(__dir, "wasm-pkg", "screening_wasm_bg.wasm"));
+    initSync({ module: wasmBuf });
+    processPeaks = process_peaks;
+  });
+
+  it("collapses to a single n/a polarity group when polarity_available=false", () => {
+    const rows = [
+      { RT: 1.0, "Base Peak": 100.0, Area: 100.0, File: "1_a", operator_mark: "sample_rep1" },
+      { RT: 1.01, "Base Peak": 100.0, Area: 110.0, File: "1_b", operator_mark: "sample_rep2" },
+    ];
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), JSON.stringify({ polarity_available: false })));
+    const pols = new Set(out.summary.map((s: { Polarity: string }) => s.Polarity));
+    expect([...pols]).toEqual(["n/a"]);
+    expect(out.results.every((r: { Polarity: string }) => r.Polarity === "n/a")).toBe(true);
+  });
+
+  it("runs RT-only (no polarity, no m/z) without the missing-m/z penalty", () => {
+    const rows = [
+      { RT: 1.0, Area: 100.0, File: "1_a", operator_mark: "sample_rep1" },
+      { RT: 1.01, Area: 110.0, File: "1_b", operator_mark: "sample_rep2" },
+    ];
+    const out = JSON.parse(
+      processPeaks(JSON.stringify(rows), JSON.stringify({ polarity_available: false, mz_available: false })),
+    );
+    const cluster = out.results.find((r: { ReplicateCount: number }) => r.ReplicateCount === 2);
+    expect(cluster.ReplicateConfidenceScore).toBeGreaterThanOrEqual(95);
+  });
+});
+
+// ── WASM: blank states (no blank vs clean blank) ─────────────────────────────
+describe("WASM blank states", () => {
+  let processPeaks: (rows: string, config: string) => string;
+
+  beforeAll(async () => {
+    const { readFileSync } = await import("fs");
+    const { fileURLToPath } = await import("url");
+    const { dirname, resolve } = await import("path");
+    const { initSync, process_peaks } = await import("./wasm-pkg/screening_wasm.js");
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const wasmBuf = readFileSync(resolve(__dir, "wasm-pkg", "screening_wasm_bg.wasm"));
+    initSync({ module: wasmBuf });
+    processPeaks = process_peaks;
+  });
+
+  it("marks no_blank_loaded when no blank exists, still Real Compound", () => {
+    const rows = [
+      { RT: 1.0, "Base Peak": 100.0, Area: 100.0, Polarity: "+", File: "1_a", operator_mark: "sample_rep1" },
+      { RT: 1.01, "Base Peak": 100.0, Area: 110.0, Polarity: "+", File: "1_b", operator_mark: "sample_rep2" },
+    ];
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), "{}"));
+    const cluster = out.results.find((r: { ReplicateCount: number }) => r.ReplicateCount === 2);
+    expect(cluster.Why.BlankState).toBe("no_blank_loaded");
+    expect(cluster.Status).toBe("Real Compound");
+  });
+
+  it("marks blank_clean_here when a blank exists but does not match", () => {
+    const rows = [
+      { RT: 1.0, "Base Peak": 100.0, Area: 100.0, Polarity: "+", File: "1_a", operator_mark: "sample_rep1" },
+      { RT: 1.01, "Base Peak": 100.0, Area: 110.0, Polarity: "+", File: "1_b", operator_mark: "sample_rep2" },
+      { RT: 8.0, "Base Peak": 300.0, Area: 50.0, Polarity: "+", File: "blank_a", operator_mark: "blank_positive" },
+      { RT: 8.01, "Base Peak": 300.0, Area: 55.0, Polarity: "+", File: "blank_b", operator_mark: "blank_negative" },
+    ];
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), "{}"));
+    const cluster = out.results.find(
+      (r: { SampleType: string; ReplicateCount: number }) => r.SampleType === "sample" && r.ReplicateCount === 2,
+    );
+    expect(cluster.Why.BlankState).toBe("blank_clean_here");
+    expect(cluster.Status).toBe("Real Compound");
+  });
+});
+
+// ── WASM: surrogate bin-width suggestion (three metrics) ──────────────────────
+describe("WASM surrogate bin-width suggestion", () => {
+  let processPeaks: (rows: string, config: string) => string;
+
+  beforeAll(async () => {
+    const { readFileSync } = await import("fs");
+    const { fileURLToPath } = await import("url");
+    const { dirname, resolve } = await import("path");
+    const { initSync, process_peaks } = await import("./wasm-pkg/screening_wasm.js");
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const wasmBuf = readFileSync(resolve(__dir, "wasm-pkg", "screening_wasm_bg.wasm"));
+    initSync({ module: wasmBuf });
+    processPeaks = process_peaks;
+  });
+
+  it("attaches MaxAbsRtShift, KStdevRt and RangeRt for a matched surrogate", () => {
+    const rows = [
+      { RT: 5.31, "Base Peak": 128.0, Area: 143250, Polarity: "+", File: "surrogate_a", Label: "d8-Naphthalene", operator_mark: "surrogate" },
+      { RT: 5.35, "Base Peak": 128.1, Area: 146000, Polarity: "+", File: "surrogate_b", Label: "d8-Naphthalene", operator_mark: "surrogate" },
+    ];
+    const config = JSON.stringify({
+      surrogates: [{ name: "d8-Naphthalene", expected_rt: 5.3, expected_area: 143250 }],
+    });
+    const out = JSON.parse(processPeaks(JSON.stringify(rows), config));
+    const surrogate = out.results.find((r: { IsSurrogate: boolean }) => r.IsSurrogate);
+    const bw = surrogate.Why.BinWidthSuggestion;
+    expect(bw).toBeDefined();
+    expect(bw.MaxAbsRtShift).toBeGreaterThan(0);
+    expect(bw.RangeRt).toBeGreaterThan(0);
+    expect(bw.KStdevRt).toBeGreaterThanOrEqual(bw.StdevRt);
+    expect(bw.ReplicateCount).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ── Column-mapping profile (task 24) ─────────────────────────────────────────
+describe("column-mapping profile", () => {
+  it("maps a renamed-header RT-only export onto canonical fields", async () => {
+    const { parseInputFile } = await import("./screening");
+    const csv = "RetentionTime,PeakArea,Sample,Compound\n1.23,500000,run_a,Caffeine";
+    const file = new File([csv], "instrument.csv", { type: "text/csv" });
+    const rows = await parseInputFile(file, "rt-only-generic");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].RT).toBe(1.23);
+    expect(rows[0].Area).toBe(500000);
+    expect(rows[0].File).toBe("run_a");
+    // Polarity declared absent → emitted empty (drives polarity_available=false).
+    expect(rows[0].Polarity).toBe("");
+    expect(rows[0]["Base Peak"]).toBeNull();
+  });
+
+  it("errors when a required canonical field is missing after mapping", async () => {
+    const { parseInputFile } = await import("./screening");
+    // Missing PeakArea (Area) column for the rt-only-generic profile.
+    const csv = "RetentionTime,Sample,Compound\n1.23,run_a,Caffeine";
+    const file = new File([csv], "instrument.csv", { type: "text/csv" });
+    await expect(parseInputFile(file, "rt-only-generic")).rejects.toThrow();
+  });
+});

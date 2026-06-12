@@ -50,6 +50,77 @@ export interface ParsedRow {
   operator_mark: string | null;
 }
 
+// ─── Column-mapping profiles ────────────────────────────────────────────────────
+
+/** Canonical fields the screening core understands. */
+type CanonicalField =
+  | "RT"
+  | "Base Peak"
+  | "Area"
+  | "Polarity"
+  | "File"
+  | "Label"
+  | "operator_mark"
+  | "operator_color";
+
+/**
+ * Per-instrument column-mapping profile. Onboards a new instrument's export by
+ * mapping its source headers to canonical fields, and declaring which optional
+ * canonical fields the instrument does not provide.
+ *
+ * - `columns`: canonical field → source header in the file. Unmapped fields fall
+ *   back to the canonical header name.
+ * - `absent`: optional canonical fields the instrument never provides. "Base Peak"
+ *   absent ⇒ RT-only (drives `mz_available=false`); "Polarity" absent ⇒ no polarity
+ *   dimension (drives `polarity_available=false`, no filename inference).
+ */
+export interface ColumnProfile {
+  id: string;
+  /** Operator-facing label. */
+  label: string;
+  columns?: Partial<Record<CanonicalField, string>>;
+  absent?: Array<"Base Peak" | "Polarity">;
+}
+
+/**
+ * Built-in instrument profiles, selectable from a preset dropdown in the UI.
+ * `default` matches the original canonical layout. Add a preset here to onboard
+ * a new instrument export without changing parsing code.
+ */
+export const INSTRUMENT_PROFILES: ColumnProfile[] = [
+  {
+    id: "default",
+    label: "Default (RT, Base Peak, Area, Polarity, File)",
+  },
+  {
+    // Example onboarding profile for an RT-only instrument whose export uses
+    // different header names and provides no m/z or polarity columns.
+    id: "rt-only-generic",
+    label: "RT-only instrument (no m/z, no polarity)",
+    columns: {
+      RT: "RetentionTime",
+      Area: "PeakArea",
+      File: "Sample",
+      Label: "Compound",
+    },
+    absent: ["Base Peak", "Polarity"],
+  },
+];
+
+export function getProfile(id: string | undefined): ColumnProfile | undefined {
+  if (!id) return undefined;
+  return INSTRUMENT_PROFILES.find((p) => p.id === id);
+}
+
+/** Source header to look for a canonical field under, honoring the profile. */
+function resolveHeader(field: CanonicalField, profile?: ColumnProfile): string {
+  return profile?.columns?.[field] ?? field;
+}
+
+function isAbsent(field: "Base Peak" | "Polarity", profile?: ColumnProfile): boolean {
+  return profile?.absent?.includes(field) ?? false;
+}
+
 /**
  * Infer ionization polarity from a filename when no `Polarity` column exists.
  * Convention: tokens like `_neg`, `neg_`, `negative` → Negative; otherwise Positive.
@@ -64,7 +135,11 @@ function inferPolarityFromFile(filename: string): string {
  * Select the sheet that has the most required column names.
  * Raises if not all required columns are found.
  */
-function selectBestSheet(wb: XLSX.WorkBook): string {
+function selectBestSheet(wb: XLSX.WorkBook, profile?: ColumnProfile): string {
+  // Required canonical fields, resolved to the source headers this profile uses.
+  const requiredSourceCols = REQUIRED_COLS.map((c) =>
+    resolveHeader(c as CanonicalField, profile),
+  );
   let bestName = wb.SheetNames[0];
   let bestScore = 0;
 
@@ -78,15 +153,15 @@ function selectBestSheet(wb: XLSX.WorkBook): string {
         headers.push(String(cell.v).trim());
       }
     }
-    const score = REQUIRED_COLS.filter((col) => headers.includes(col)).length;
+    const score = requiredSourceCols.filter((col) => headers.includes(col)).length;
     if (score > bestScore) {
       bestScore = score;
       bestName = name;
     }
   }
 
-  if (bestScore < REQUIRED_COLS.length) {
-    throw new Error(t("noValidSheet", { columns: REQUIRED_COLS.join(", ") }));
+  if (bestScore < requiredSourceCols.length) {
+    throw new Error(t("noValidSheet", { columns: requiredSourceCols.join(", ") }));
   }
   return bestName;
 }
@@ -96,8 +171,8 @@ function selectBestSheet(wb: XLSX.WorkBook): string {
  * Reads cell fill colors from the first column to assign operator_mark
  * (only meaningful for xlsx; csv/txt have no styles).
  */
-function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
-  const sheetName = selectBestSheet(wb);
+function parseWorkbook(wb: XLSX.WorkBook, profile?: ColumnProfile): ParsedRow[] {
+  const sheetName = selectBestSheet(wb, profile);
   const ws = wb.Sheets[sheetName];
 
   const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
@@ -109,15 +184,31 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
     headers.push(cell?.v != null ? String(cell.v).trim() : "");
   }
 
+  // Resolve canonical fields to column indices via the profile.
+  const idxOf = (field: CanonicalField): number =>
+    headers.indexOf(resolveHeader(field, profile));
+
   const colIdx: Record<string, number> = {};
   for (const col of REQUIRED_COLS) {
-    const idx = headers.indexOf(col);
+    const idx = idxOf(col as CanonicalField);
     if (idx !== -1) colIdx[col] = idx;
   }
+  // Validate required canonical fields are present after mapping.
+  const missingRequired = REQUIRED_COLS.filter((c) => colIdx[c] === undefined);
+  if (missingRequired.length > 0) {
+    const sources = missingRequired
+      .map((c) => `${c} → "${resolveHeader(c as CanonicalField, profile)}"`)
+      .join(", ");
+    throw new Error(t("noValidSheet", { columns: sources }));
+  }
+
+  const polarityAbsent = isAbsent("Polarity", profile);
+  const basePeakAbsent = isAbsent("Base Peak", profile);
+
   // Optional columns.
-  const labelIdx = headers.indexOf("Label");
-  const operatorMarkIdx = headers.indexOf("operator_mark");
-  const operatorColorIdx = headers.indexOf("operator_color");
+  const labelIdx = idxOf("Label");
+  const operatorMarkIdx = idxOf("operator_mark");
+  const operatorColorIdx = idxOf("operator_color");
 
   const rows: ParsedRow[] = [];
 
@@ -134,11 +225,13 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
         : undefined;
 
     const rtCell = get("RT");
-    const mzIdx = headers.indexOf("Base Peak");
+    const mzIdx = basePeakAbsent ? -1 : idxOf("Base Peak");
     const mzCell =
         mzIdx !== -1 ? ws[XLSX.utils.encode_cell({ r, c: mzIdx })] : undefined;
     const areaCell = get("Area");
-    const polCell = get("Polarity");
+    const polIdx = polarityAbsent ? -1 : idxOf("Polarity");
+    const polCell =
+        polIdx !== -1 ? ws[XLSX.utils.encode_cell({ r, c: polIdx })] : undefined;
     const fileCell = get("File");
 
     // Skip rows missing numeric essentials.
@@ -148,8 +241,12 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
     if (!isFinite(rt) || !isFinite(area)) continue;
 
     const file = fileCell?.v != null ? String(fileCell.v).trim() : "";
-    const polarity =
-      polCell?.v != null && String(polCell.v).trim() !== ""
+    // When Polarity is declared absent, emit empty (the WASM core normalizes to
+    // the "n/a" sentinel and runs in single-group mode). Otherwise use the
+    // column value, falling back to filename inference for legacy layouts.
+    const polarity = polarityAbsent
+      ? ""
+      : polCell?.v != null && String(polCell.v).trim() !== ""
         ? String(polCell.v).trim()
         : inferPolarityFromFile(file);
 
@@ -191,29 +288,33 @@ function parseWorkbook(wb: XLSX.WorkBook): ParsedRow[] {
 interface FormatParser {
   name: string;
   match: (file: File) => boolean;
-  parse: (file: File) => Promise<ParsedRow[]>;
+  parse: (file: File, profile?: ColumnProfile) => Promise<ParsedRow[]>;
 }
 
 const PARSERS: FormatParser[] = [
   {
     name: "csv",
     match: (f) => /\.(csv|tsv|txt)$/i.test(f.name),
-    parse: async (f) =>
-      parseWorkbook(XLSX.read(await f.text(), { type: "string" })),
+    parse: async (f, profile) =>
+      parseWorkbook(XLSX.read(await f.text(), { type: "string" }), profile),
   },
   {
     name: "xlsx",
     match: (f) => /\.(xlsx|xls)$/i.test(f.name),
-    parse: async (f) =>
+    parse: async (f, profile) =>
       parseWorkbook(
         XLSX.read(await f.arrayBuffer(), { type: "array", cellStyles: true }),
+        profile,
       ),
   },
 ];
 
-export async function parseInputFile(file: File): Promise<ParsedRow[]> {
+export async function parseInputFile(
+  file: File,
+  profileId?: string,
+): Promise<ParsedRow[]> {
   const parser = PARSERS.find((p) => p.match(file)) ?? PARSERS[PARSERS.length - 1];
-  return parser.parse(file);
+  return parser.parse(file, getProfile(profileId));
 }
 
 // ─── WASM lazy loader ─────────────────────────────────────────────────────────
@@ -254,6 +355,8 @@ export interface ScreeningParams {
   cv_moderate_max?: number;
   /** Automatically set to false when the dataset has no Base Peak column (RT-only instruments). */
   mz_available?: boolean;
+  /** Automatically set to false when the dataset has no Polarity for any row (no polarity dimension). */
+  polarity_available?: boolean;
   /**
    * Optional minimum absolute area difference (area_sample − area_blank).
    * When set, a peak is classified as Artifact if area_difference < this value
@@ -300,8 +403,9 @@ interface RawScreeningResponse {
 export async function screenFile(
   file: File,
   params: ScreeningParams,
+  profileId?: string,
 ): Promise<ScreeningResult> {
-  const rawRows = await parseInputFile(file);
+  const rawRows = await parseInputFile(file, profileId);
 
   return screenRows(rawRows, params, file.name);
 }
@@ -328,9 +432,14 @@ export function screenRowsWithProcessor(
   const hasMz = rawRows.some(
     (r) => r["Base Peak"] != null && isFinite(r["Base Peak"] as number),
   );
-  const effectiveParams: ScreeningParams = hasMz
-    ? params
-    : { ...params, mz_available: false };
+  const hasPolarity = rawRows.some(
+    (r) => typeof r.Polarity === "string" && r.Polarity.trim() !== "",
+  );
+  const effectiveParams: ScreeningParams = {
+    ...params,
+    ...(hasMz ? {} : { mz_available: false }),
+    ...(hasPolarity ? {} : { polarity_available: false }),
+  };
 
   const resultJson = processor(
     JSON.stringify(rawRows),

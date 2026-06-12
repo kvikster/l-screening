@@ -10,7 +10,10 @@ pub struct Row {
     pub base_peak: Option<f64>,
     #[serde(rename = "Area")]
     pub area: f64,
-    #[serde(rename = "Polarity")]
+    /// Optional: absent or empty when the instrument has no polarity dimension.
+    /// Normalized to the sentinel "n/a" in `process_peaks_inner` when absent or
+    /// when `config.polarity_available` is false, so all rows fall into one group.
+    #[serde(rename = "Polarity", default)]
     pub polarity: String,
     #[serde(rename = "File")]
     pub file: String,

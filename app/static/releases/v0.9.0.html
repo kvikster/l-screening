@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Реліз v0.9.0</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #dbe4f0;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 12rem);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 72px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 18px 0 10px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+    }
+    p, li {
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 1.2rem;
+    }
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    li + li { margin-top: 10px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.95em;
+      background: #eff6ff;
+      color: #1d4ed8;
+      padding: 0.1em 0.4em;
+      border-radius: 6px;
+    }
+    .back {
+      display: inline-block;
+      margin-top: 24px;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back:hover { text-decoration: underline; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 28px 0 0; }
+    a { color: var(--accent); }
+
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <article class="card">
+      <div class="eyebrow">Release Notes</div>
+      <h1>Реліз v0.9.0</h1>
+<p><code>v0.9.0</code> робить алгоритм скринінгу стійким до реальних вхідних даних: інші прилади, відсутні виміри (полярність, m/z) та чисті blank більше не ламають обробку. Паралельно уточнено екранну термінологію, щоб назви метрик відповідали лабораторному словнику.</p>
+<h2>Що змінилося для користувача</h2>
+<ul>
+<li><p><strong>Вхідні формати та профілі приладів</strong>:</p>
+<ul>
+<li>Приймаються файли <strong>CSV, TSV, TXT, XLSX, XLS</strong>. Текст з роздільниками читається як таблиця; Excel додатково несе кольори заливки клітинок як мітки оператора.</li>
+<li>Новий <strong>профіль приладу</strong> в панелі імпорту дозволяє підключити прилад з іншими заголовками експорту: він зіставляє заголовки приладу (наприклад <code>RetentionTime → RT</code>, <code>PeakArea → Area</code>) з канонічними полями і може оголосити <code>Base Peak</code> / <code>Polarity</code> відсутніми.</li>
+<li>Набір зразків формується у workspace з одного або кількох файлів.</li>
+</ul>
+</li>
+<li><p><strong>Робота без Polarity або без Polarity та Base Peak (RT-only)</strong>:</p>
+<ul>
+<li>Без колонки <code>Polarity</code> усі рядки утворюють одну групу <code>n/a</code> замість розбиття за полярністю.</li>
+<li>Без <code>Polarity</code> і <code>Base Peak</code> одночасно алгоритм працює в режимі RT-only — реплікати й blank зіставляються лише за часом утримання.</li>
+<li>Коли m/z відсутній у всьому наборі, штраф довіри за відсутність m/z не застосовується (це властивість формату даних, а не слабкість зіставлення).</li>
+</ul>
+</li>
+<li><p><strong>Signal-to-Blank без корзини blank</strong>:</p>
+<ul>
+<li>Якщо у піка зразка немає зіставленої корзини blank, поле більше не лишається порожнім. У <code>Why.BlankState</code> повідомляється один із трьох станів: <code>blank_subtracted</code> (blank зіставлено й віднято), <code>blank_clean_here</code> (blank є, але чистий на цьому RT), <code>no_blank_loaded</code> (blank узагалі не завантажено — наприклад, був настільки чистий, що оператор нічого не виявив).</li>
+<li>Обидва випадки «без blank» лишаються <strong>Real Compound</strong> — чистий blank читається як сильний результат, а не як відсутній.</li>
+</ul>
+</li>
+<li><p><strong>Ширина корзини кластера за поведінкою сурогата</strong>:</p>
+<ul>
+<li>Відкривши додаткові дані (аудит) сурогата, ви побачите <code>Why.BinWidthSuggestion</code> з трьома рекомендаційними метриками розкиду RT — <code>MaxAbsRtShift</code>, <code>KStdevRt</code> (k·σ, k=3) і <code>RangeRt</code> — кожна з кількістю реплікатів.</li>
+<li>Це лише підказка: жодне значення не застосовується автоматично, оператор вводить його в Конфігурацію аналізатора вручну.</li>
+</ul>
+</li>
+<li><p><strong>Термінологія</strong>:</p>
+<ul>
+<li><strong>CV% — це RSD</strong> (відносне стандартне відхилення). UI тепер позначає метрику <code>RSD (CV%)</code>, числове значення не змінюється.</li>
+<li><strong>1 реплікат = 1 хроматограма</strong> — підпис тепер «Реплікати (хроматограми)».</li>
+</ul>
+</li>
+<li><p><strong>Підсвічування походження реплікатів</strong>:</p>
+<ul>
+<li>Кількість реплікатів візуально виділена; при наведенні показується походження кожного реплікату — вихідні файли та, якщо кластер зібрано з паралельних зразків, які саме зразки він охоплює (бурштинове кільце позначає змішане походження).</li>
+</ul>
+</li>
+</ul>
+<h2>Що це означає на практиці</h2>
+<ul>
+<li>Дані з нового приладу підключаються через профіль колонок без зміни коду.</li>
+<li>Методи без полярності чи без m/z (GC-FID, LC-UV тощо) тепер проходять скринінг.</li>
+<li>Чистий blank більше не виглядає як «немає даних» — він явно позначений і не псує висновок.</li>
+<li>Сурогат сам підказує розумну «ширину корзини» для допуску RT.</li>
+<li>Назви метрик на екрані збігаються з лабораторним словником (RSD, хроматограма).</li>
+</ul>
+<h2>Технічні деталі</h2>
+<ul>
+<li>Ядро Rust/WASM: <code>Polarity</code> опціональна, прапорець <code>polarity_available</code>; три стани blank у <code>Why.BlankState</code>; метрики <code>Why.BinWidthSuggestion</code> для сурогатів.</li>
+<li>TS: профілі зіставлення колонок (<code>ColumnProfile</code>, <code>INSTRUMENT_PROFILES</code>), авто-визначення <code>polarity_available</code>.</li>
+<li>UI/i18n (en/uk/ru): підписи RSD (CV%) та «Реплікати (хроматограми)», підсвічування реплікатів, dropdown профілю приладу.</li>
+<li>Тести: Rust unit (5), WASM/TS vitest (35), Python parity (12) — усі зелені.</li>
+</ul>
+<hr>
+<p><a href="./v0.8.0.html">← Попередній реліз: v0.8.0</a> | <a href="./README.html">← Список релізів</a></p>
+
+      <a class="back" href="../">Повернутися до застосунку</a>
+    </article>
+  </main>
+</body>
+</html>

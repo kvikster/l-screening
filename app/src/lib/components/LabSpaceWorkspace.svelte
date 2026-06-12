@@ -15,7 +15,7 @@
     retagDatasetRowsForKind,
     validateDatasetForKind,
   } from "$lib/labspace/runtime";
-  import { parseInputFile, screenRows } from "$lib/screening";
+  import { parseInputFile, screenRows, INSTRUMENT_PROFILES } from "$lib/screening";
   import type {
     AnalyzerPreset,
     LabSpaceState,
@@ -52,6 +52,10 @@
   let labState: LabSpaceState | null = $state(null);
   let analyzerDraft: AnalyzerDraft = $state(makeAnalyzerDraft(defaultAnalyzerPreset()));
   let importKind: StoredDataset["kind"] = $state("analysis");
+  // Column-mapping preset applied when parsing an imported file. "default" matches
+  // the canonical layout; other presets onboard instruments with different headers
+  // or missing m/z / polarity columns.
+  let importProfileId = $state("default");
   let dict = $derived($dictionary);
 
   const datasetKinds: StoredDataset["kind"][] = ["analysis", "blank", "surrogate_observed"];
@@ -211,7 +215,7 @@
     resetFeedback();
     busy = true;
     try {
-      const parsedRows = await parseInputFile(file);
+      const parsedRows = await parseInputFile(file, importProfileId);
       const rows = kind === "analysis" ? parsedRows : retagDatasetRowsForKind(parsedRows, kind);
       const validationError = validateDatasetForKind(kind, rows);
       if (validationError) {
@@ -737,8 +741,17 @@
                     </select>
                   </label>
                   <label class="space-y-1 text-sm">
+                    <span class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{dict.labspaceInstrumentProfile ?? "Instrument profile"}</span>
+                    <select bind:value={importProfileId} class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-50">
+                      {#each INSTRUMENT_PROFILES as profile}
+                        <option value={profile.id}>{profile.label}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="space-y-1 text-sm">
                     <span class="text-xs font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{dict.chooseFile}</span>
                     <input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" onchange={(event) => handleDatasetImport(importKind, event)} class="block w-full text-[11px] text-slate-500 file:mr-2 file:rounded-full file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-xs file:font-medium file:text-white dark:text-slate-400 dark:file:bg-slate-100 dark:file:text-slate-900" />
+                    <span class="block text-[10px] text-slate-400 dark:text-slate-500">{dict.labspaceAcceptedFormats ?? "Accepted: CSV, TSV, TXT, XLSX, XLS"}</span>
                   </label>
                 </div>
               </div>
@@ -1073,6 +1086,7 @@
                     <label class="space-y-1 text-sm">
                       <span class="font-medium text-slate-700 dark:text-slate-200">{dict.labspaceRepRt}</span>
                       <input bind:value={analyzerDraft.replicate_rt_tol} oninput={syncBlankWithReplicateDraft} type="number" min="0" step="0.01" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-50" />
+                      <span class="block text-[10px] text-slate-400 dark:text-slate-500">{dict.labspaceBinWidthHint}</span>
                     </label>
                     <label class="space-y-1 text-sm">
                       <span class="font-medium text-slate-700 dark:text-slate-200">{dict.labspaceRepMz}</span>

@@ -100,7 +100,7 @@ export const ukMessages = {
     confirmedPeaks: "Підтверджені піки",
     displayedPeaks: "Показані піки",
     ofTotal: "з {total} загалом",
-    meanCv: "Середній CV%",
+    meanCv: "Середній RSD (CV%)",
     meanConfidence: "Середня довіра",
     qcSummary: "QC-зведення",
     qcSummaryDesc:
@@ -139,6 +139,11 @@ export const ukMessages = {
         "Сортування за замовчуванням пріоритизує найвищу довіру",
     areaMean: "Середня Area",
     replicates: "Реплікати",
+    replicatesChromatograms: "Реплікати (хроматограми)",
+    parallelSources: "Джерела",
+    rsdCv: "RSD (CV%)",
+    rsdCvHint:
+        "Відносне стандартне відхилення площ реплікатів — та сама величина, що раніше позначалась як CV%.",
     marks: "Мітки",
     audit: "Аудит",
     noColor: "Без кольору",
@@ -170,6 +175,10 @@ export const ukMessages = {
     labspaceReportDeleted: "Репорт видалено.",
     labspaceLoading: "Завантаження LabSpace...",
     labspaceLoadFailed: "Не вдалося завантажити стан LabSpace.",
+    labspaceInstrumentProfile: "Профіль приладу",
+    labspaceBinWidthHint:
+        "Підказка: відкрийте аудит сурогата (BinWidthSuggestion) — max|зсув RT|, k·σ та розмах допоможуть задати це значення.",
+    labspaceAcceptedFormats: "Приймається: CSV, TSV, TXT, XLSX, XLS",
     labspaceRunEyebrow: "Запуск",
     labspaceWorkspaceSettings: "Налаштування простору",
     labspaceRunTitle: "Запуск лабораторного скринінгу",

@@ -68,6 +68,13 @@ pub struct ScreeningConfig {
     /// because the absence is a data-format property, not a matching weakness.
     #[serde(default = "default_mz_available")]
     pub mz_available: bool,
+    /// When false, the entire dataset has no Polarity column (instrument with no
+    /// polarity dimension). All rows are normalized to the sentinel polarity "n/a"
+    /// so they group together instead of splitting per-polarity. Dataset-level flag
+    /// mirroring `mz_available`; set by the JS layer when Polarity is absent/empty
+    /// for all rows.
+    #[serde(default = "default_polarity_available")]
+    pub polarity_available: bool,
     /// Optional minimum absolute area difference (area_sample - area_blank).
     /// When set, a peak is classified as Artifact if area_difference < this value
     /// even if the S/B ratio passes the threshold — guards against unstable ratios
@@ -96,6 +103,7 @@ fn default_signal_to_blank_min() -> f64 { DEFAULT_SIGNAL_TO_BLANK_MIN }
 fn default_cv_high_max() -> f64 { DEFAULT_CV_HIGH_MAX }
 fn default_cv_moderate_max() -> f64 { DEFAULT_CV_MODERATE_MAX }
 fn default_mz_available() -> bool { true }
+fn default_polarity_available() -> bool { true }
 
 impl ScreeningConfig {
     pub fn validate(&self) -> Result<(), String> {
@@ -148,6 +156,7 @@ impl Default for ScreeningConfig {
             cv_high_max: DEFAULT_CV_HIGH_MAX,
             cv_moderate_max: DEFAULT_CV_MODERATE_MAX,
             mz_available: true,
+            polarity_available: true,
             min_area_difference: None,
             surrogates: vec![],
             mark_aliases: HashMap::new(),

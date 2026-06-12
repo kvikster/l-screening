@@ -326,6 +326,21 @@ fn merge_parallel_cluster(
         agg_signal_to_blank_ratio,
         thresholds.signal_to_blank_min,
     );
+    // Aggregate the three-state blank outcome across sources. If any source had a
+    // blank match the merged row is subtracted; otherwise it is "clean here" when
+    // a blank was loaded for at least one source, or "no blank loaded" when none was.
+    let agg_blank_state = if has_blank_match {
+        "blank_subtracted"
+    } else if member_rows.iter().any(|r| {
+        r.why
+            .get("BlankState")
+            .and_then(|v| v.as_str())
+            .map_or(false, |s| s == "blank_clean_here")
+    }) {
+        "blank_clean_here"
+    } else {
+        "no_blank_loaded"
+    };
     let total_blank_candidate_count: u64 = member_rows
         .iter()
         .map(|r| {
@@ -427,9 +442,11 @@ fn merge_parallel_cluster(
             "AggregatedAreaDifference": agg_area_difference.map(|v| safe_round(v, 2)),
             "Threshold": config.signal_to_blank_min,
             "Decision": agg_status.clone(),
+            "BlankState": agg_blank_state,
             "PerSource": per_source_blank,
         },
         "BlankMatch": has_blank_match,
+        "BlankState": agg_blank_state,
         "BlankCandidateCount": total_blank_candidate_count,
         "BlankAreaMean": agg_blank_area.map(|v| safe_round(v, 2)),
         "AreaDifference": agg_area_difference.map(|v| safe_round(v, 2)),
@@ -488,6 +505,58 @@ fn merge_parallel_cluster(
     }
 }
 
+/// Extract per-replicate RT values for a coarse-level ConfirmedRow from
+/// `Why.ReplicateMembers[].rt`, falling back to `Why.ReplicateRT.mean` / rt_mean.
+fn replicate_rt_values(row: &ConfirmedRow) -> Vec<f64> {
+    if let Some(members) = row.why.get("ReplicateMembers").and_then(|v| v.as_array()) {
+        let parsed: Vec<f64> = members
+            .iter()
+            .filter_map(|m| m.get("rt").and_then(|v| v.as_f64()))
+            .collect();
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+    vec![row.rt_mean; row.replicate_count.max(1)]
+}
+
+/// Suggested cluster bin-width ("replicate RT tolerance") metrics derived from a
+/// surrogate's observed RT behavior. All three are advisory; the operator chooses
+/// which to enter into Analyzer Configuration. `k` is the multiplier used for the
+/// stdev-based suggestion.
+fn surrogate_bin_width_metrics(rts: &[f64], expected_rt: Option<f64>, k: f64) -> Value {
+    let n = rts.len();
+    let max_abs_shift = expected_rt.map(|exp| {
+        rts.iter()
+            .map(|&rt| (rt - exp).abs())
+            .fold(0.0_f64, f64::max)
+    });
+    let range = if n >= 1 {
+        let max = rts.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min = rts.iter().cloned().fold(f64::INFINITY, f64::min);
+        max - min
+    } else {
+        0.0
+    };
+    let stdev = if n >= 2 {
+        let mean = rts.iter().sum::<f64>() / n as f64;
+        let var = rts.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+        var.sqrt()
+    } else {
+        0.0
+    };
+    json!({
+        "ReplicateCount": n,
+        "MaxAbsRtShift": max_abs_shift.map(|v| safe_round(v, 4)),
+        "StdevRt": safe_round(stdev, 4),
+        "StdevMultiplier": k,
+        "KStdevRt": safe_round(k * stdev, 4),
+        "RangeRt": safe_round(range, 4),
+        "Unit": "min",
+        "Advisory": true,
+    })
+}
+
 /// Validate surrogate rows against SurrogateSpec entries in config.
 /// Matches each surrogate ConfirmedRow to the closest configured spec by RT,
 /// then populates surrogate_recovery_pct, surrogate_rt_shift, surrogate_pass, and
@@ -495,8 +564,13 @@ fn merge_parallel_cluster(
 fn surrogate_validation_pass(surrogates: &mut [ConfirmedRow], config: &ScreeningConfig) {
     let default_rt_window = config.replicate_rt_tol * 2.0;
 
+    // Multiplier for the stdev-based bin-width suggestion (≈ ±k·σ coverage).
+    const BIN_WIDTH_K: f64 = 3.0;
+
     for row in surrogates.iter_mut() {
         row.is_surrogate = true;
+
+        let replicate_rts = replicate_rt_values(row);
 
         let best_spec = config
             .surrogates
@@ -533,10 +607,18 @@ fn surrogate_validation_pass(surrogates: &mut [ConfirmedRow], config: &Screening
                 safe_round(row.area_mean / c, 4)
             });
 
+            let bin_width = surrogate_bin_width_metrics(
+                &replicate_rts,
+                Some(spec.expected_rt),
+                BIN_WIDTH_K,
+            );
+
             if let Some(why_obj) = row.why.as_object_mut() {
+                why_obj.insert("BinWidthSuggestion".into(), bin_width.clone());
                 why_obj.insert(
                     "SurrogateValidation".into(),
                     json!({
+                        "BinWidthSuggestion": bin_width,
                         "MatchedSpec": spec.name,
                         "ExpectedRT": spec.expected_rt,
                         "ExpectedMZ": spec.expected_mz,
@@ -556,6 +638,11 @@ fn surrogate_validation_pass(surrogates: &mut [ConfirmedRow], config: &Screening
             }
         } else {
             // Row is a surrogate but no spec matched within its RT window.
+            // Bin-width spread metrics still apply (range/stdev need no spec).
+            let bin_width = surrogate_bin_width_metrics(&replicate_rts, None, BIN_WIDTH_K);
+            if let Some(why_obj) = row.why.as_object_mut() {
+                why_obj.insert("BinWidthSuggestion".into(), bin_width);
+            }
             row.status = "Surrogate".to_string();
         }
     }
@@ -663,6 +750,98 @@ pub fn process_peaks(rows_json: &str, config_json: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn run(rows: &str, config: &str) -> Value {
+        let out = process_peaks_inner(rows, config).expect("process ok");
+        serde_json::from_str(&out).unwrap()
+    }
+
+    // Two replicates per sample, no Polarity column → single "n/a" group.
+    #[test]
+    fn no_polarity_collapses_to_single_group() {
+        let rows = r#"[
+            {"RT":1.00,"Base Peak":100.0,"Area":100.0,"File":"1_a","operator_mark":"sample_rep1"},
+            {"RT":1.01,"Base Peak":100.0,"Area":110.0,"File":"1_b","operator_mark":"sample_rep2"}
+        ]"#;
+        let cfg = r#"{"polarity_available":false}"#;
+        let v = run(rows, cfg);
+        let summary = v["summary"].as_array().unwrap();
+        // All sample rows share one polarity group.
+        let pols: std::collections::HashSet<&str> = summary
+            .iter()
+            .map(|s| s["Polarity"].as_str().unwrap())
+            .collect();
+        assert_eq!(pols, ["n/a"].into_iter().collect());
+        let results = v["results"].as_array().unwrap();
+        assert!(results.iter().all(|r| r["Polarity"] == "n/a"));
+    }
+
+    // No Polarity and no Base Peak → RT-only run with the missing-m/z penalty waived.
+    #[test]
+    fn rt_only_waives_mz_penalty() {
+        let rows = r#"[
+            {"RT":1.00,"Area":100.0,"File":"1_a","operator_mark":"sample_rep1"},
+            {"RT":1.01,"Area":110.0,"File":"1_b","operator_mark":"sample_rep2"}
+        ]"#;
+        let cfg = r#"{"polarity_available":false,"mz_available":false}"#;
+        let v = run(rows, cfg);
+        let results = v["results"].as_array().unwrap();
+        let cluster = results.iter().find(|r| r["ReplicateCount"] == 2).unwrap();
+        // No m/z: confidence should not carry the −10 missing-m/z penalty, so a
+        // tight RT match stays at/above 95.
+        assert!(cluster["ReplicateConfidenceScore"].as_f64().unwrap() >= 95.0);
+    }
+
+    // No blank rows anywhere → BlankState = no_blank_loaded, still Real Compound.
+    #[test]
+    fn no_blank_loaded_state() {
+        let rows = r#"[
+            {"RT":1.00,"Base Peak":100.0,"Area":100.0,"Polarity":"+","File":"1_a","operator_mark":"sample_rep1"},
+            {"RT":1.01,"Base Peak":100.0,"Area":110.0,"Polarity":"+","File":"1_b","operator_mark":"sample_rep2"}
+        ]"#;
+        let v = run(rows, "{}");
+        let results = v["results"].as_array().unwrap();
+        let cluster = results.iter().find(|r| r["ReplicateCount"] == 2).unwrap();
+        assert_eq!(cluster["Why"]["BlankState"], "no_blank_loaded");
+        assert_eq!(cluster["Status"], "Real Compound");
+    }
+
+    // Blank exists but at a different RT → BlankState = blank_clean_here.
+    #[test]
+    fn blank_clean_here_state() {
+        let rows = r#"[
+            {"RT":1.00,"Base Peak":100.0,"Area":100.0,"Polarity":"+","File":"1_a","operator_mark":"sample_rep1"},
+            {"RT":1.01,"Base Peak":100.0,"Area":110.0,"Polarity":"+","File":"1_b","operator_mark":"sample_rep2"},
+            {"RT":8.00,"Base Peak":300.0,"Area":50.0,"Polarity":"+","File":"blank_a","operator_mark":"blank_positive"},
+            {"RT":8.01,"Base Peak":300.0,"Area":55.0,"Polarity":"+","File":"blank_b","operator_mark":"blank_negative"}
+        ]"#;
+        let v = run(rows, "{}");
+        let results = v["results"].as_array().unwrap();
+        let cluster = results
+            .iter()
+            .find(|r| r["SampleType"] == "sample" && r["ReplicateCount"] == 2)
+            .unwrap();
+        assert_eq!(cluster["Why"]["BlankState"], "blank_clean_here");
+        assert_eq!(cluster["Status"], "Real Compound");
+    }
+
+    #[test]
+    fn bin_width_metrics_cover_three_measures() {
+        let rts = vec![1.00, 1.04, 1.10];
+        let m = surrogate_bin_width_metrics(&rts, Some(1.00), 3.0);
+        // range = 0.10; max|shift| vs 1.00 = 0.10; stdev > 0.
+        assert!((m["RangeRt"].as_f64().unwrap() - 0.10).abs() < 1e-6);
+        assert!((m["MaxAbsRtShift"].as_f64().unwrap() - 0.10).abs() < 1e-6);
+        assert!(m["StdevRt"].as_f64().unwrap() > 0.0);
+        assert!(m["KStdevRt"].as_f64().unwrap() > m["StdevRt"].as_f64().unwrap());
+        assert_eq!(m["ReplicateCount"], 3);
+    }
+}
+
 fn process_peaks_inner(rows_json: &str, config_json: &str) -> Result<String, String> {
     let config: ScreeningConfig =
         serde_json::from_str(config_json).map_err(|e| format!("Invalid config: {e}"))?;
@@ -672,8 +851,14 @@ fn process_peaks_inner(rows_json: &str, config_json: &str) -> Result<String, Str
         serde_json::from_str(rows_json).map_err(|e| format!("Invalid rows: {e}"))?;
 
     // Validate required fields and assign SampleType.
+    // Normalize polarity to the sentinel "n/a" when the dataset has no polarity
+    // dimension (config.polarity_available == false) or an individual cell is
+    // empty, so those rows group together instead of forming a split group.
     for row in &mut rows {
         row.sample_type = assign_sample_type(row, &config);
+        if !config.polarity_available || row.polarity.trim().is_empty() {
+            row.polarity = "n/a".to_string();
+        }
     }
 
     // Group row indices by (SampleType, Polarity).
@@ -718,13 +903,14 @@ fn process_peaks_inner(rows_json: &str, config_json: &str) -> Result<String, Str
     // is matched against blanks individually so that artifact/real-compound
     // status is decided at the level of an actual measurement, not on an
     // already-averaged row that may mask sample-specific contamination.
+    let any_blank_loaded = !blanks.is_empty();
     for peak in &mut sample_confirmed {
         let candidates = if blanks.is_empty() {
             vec![]
         } else {
             blank_candidates(peak, &blanks, &config)
         };
-        apply_blank_result(peak, &blanks, &candidates, &config);
+        apply_blank_result(peak, &blanks, &candidates, &config, any_blank_loaded);
     }
 
     // Parallel merge across samples — aggregates per-source blank results.

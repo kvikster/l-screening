@@ -56,12 +56,22 @@
      * аркушів обирається той, у якого найбільша кількість збігів по колонках.
      */
     const columns = [
-        ["RT", "number", "Retention time — час утримання піку в колонці", "2.345"],
-        ["Base Peak", "number", "m/z базового піку", "195.08"],
-        ["Polarity", "string", "Полярність іонізації: positive / negative", "positive"],
-        ["File", "string", "Ім'я файлу для ідентифікації зразка і репліки", "1_pos.d"],
-        ["Area", "number", "Площа піку", "1250000"],
+        ["RT", "number", "Retention time — час утримання піку (обов'язково)", "2.345"],
+        ["Base Peak", "number", "m/z базового піку — ОПЦІОНАЛЬНО. Відсутній ⇒ режим RT-only (GC-FID, LC-UV); штраф за відсутність m/z не застосовується.", "195.08"],
+        ["Polarity", "string", "Полярність іонізації — ОПЦІОНАЛЬНО. Відсутня/порожня для всіх рядків ⇒ одна група \"n/a\", без розбиття за полярністю.", "positive"],
+        ["File", "string", "Ім'я файлу для ідентифікації зразка і репліки (обов'язково)", "1_pos.d"],
+        ["Area", "number", "Площа піку (обов'язково)", "1250000"],
         ["Label", "string", "Опціональна мітка оператора", "Caffeine"],
+    ];
+
+    // Прийнятні формати вхідних файлів. Текст з роздільниками (CSV/TSV/TXT)
+    // читається як таблиця; XLSX/XLS додатково несуть кольори заливки клітинок
+    // як мітки оператора. Новий прилад з іншими заголовками підключається через
+    // профіль зіставлення колонок.
+    const inputFormats = [
+        ["CSV / TSV / TXT", "Текст з роздільниками. Без кольорів клітинок — мітки мають бути в колонках operator_mark / operator_color."],
+        ["XLSX / XLS", "Книга Excel. Кольори заливки клітинок читаються як мітки оператора."],
+        ["Профіль колонок", "Зіставляє заголовки нового приладу (RetentionTime → RT, PeakArea → Area) з канонічними полями; може оголосити Base Peak / Polarity відсутніми."],
     ];
 
     /**
@@ -102,11 +112,14 @@
      */
     const outputFields = [
         ["RT_mean", "Середній RT підтвердженого кластера."],
-        ["MZ_mean", "Середній m/z підтвердженого кластера."],
+        ["MZ_mean", "Середній m/z підтвердженого кластера (null для даних RT-only)."],
         ["Area_mean", "Середня площа піку без обрізання до int."],
-        ["AreaCVPct", "CV% між площами піків реплікатів."],
-        ["ReplicateQuality", "High / Moderate / Low — оцінка якості за CV%."],
-        ["SignalToBlankRatio", "S/B ratio для зіставленого blank-піка."],
+        ["AreaCVPct", "RSD (відносне стандартне відхилення) площ піків реплікатів — та сама величина, що раніше CV%. В UI: \"RSD (CV%)\"."],
+        ["ReplicateCount", "Кількість реплікатів у кластері. 1 реплікат = 1 хроматограма."],
+        ["ReplicateQuality", "High / Moderate / Low — оцінка якості за RSD."],
+        ["SignalToBlankRatio", "S/B ratio для зіставленого blank-піка; null, коли віднімати нічого."],
+        ["Why.BlankState", "blank_subtracted (blank зіставлено й віднято) · blank_clean_here (blank є, але чистий на цьому RT) · no_blank_loaded (blank узагалі не завантажено). Останні два лишаються Real Compound."],
+        ["Why.BinWidthSuggestion", "Для сурогатів: рекомендаційні метрики ширини корзини за розкидом RT — MaxAbsRtShift, KStdevRt (k·σ), RangeRt — кожна з кількістю реплікатів."],
         ["ConfidenceScore", "Підсумковий показник довіри 0–100."],
         ["Status", "Real Compound або Artifact."],
         ["Why", "JSON-об'єкт із decision trail та деталями порогів."],
@@ -132,11 +145,13 @@
      *     класифікується як Artifact, а не Real Compound
      */
     const params = [
-        ["replicate_rt_tol", "0.1", "хв", "Coarse screening"],
+        ["replicate_rt_tol", "0.1", "хв", "Coarse screening (рекомендація ширини корзини сурогата допомагає задати значення)"],
         ["replicate_mz_tol", "0.3", "Da / ppm", "Coarse screening"],
         ["blank_rt_tol", "0.1", "хв", "Blank subtraction"],
         ["blank_mz_tol", "0.3", "Da / ppm", "Blank subtraction"],
         ["signal_to_blank_min", "3.0", "ratio", "Artifact / Real Compound decision"],
+        ["mz_available", "true", "прапорець", "Авто-false без колонки Base Peak ⇒ RT-only; знімає штраф за m/z"],
+        ["polarity_available", "true", "прапорець", "Авто-false без Polarity ⇒ одна група \"n/a\""],
     ];
 
     /**
@@ -150,10 +165,12 @@
     const glossary = [
         ["RT", "Час утримання аналіту в колонці."],
         ["m/z", "Співвідношення маси іона до заряду."],
-        ["Replicate", "Незалежне повторне вимірювання того самого зразка."],
+        ["Replicate", "Незалежне повторне вимірювання того самого зразка. 1 реплікат = 1 хроматограма."],
         ["Blank", "Холостий зразок для виявлення фонового сигналу."],
-        ["CV%", "Відносна варіабельність площ піків між реплікатами."],
-        ["S/B ratio", "Signal-to-Blank ratio для зіставленого blank-піка."],
+        ["RSD (CV%)", "Відносне стандартне відхилення площ реплікатів (σ/середнє·100). RSD і CV% — одне й те саме; UI використовує RSD."],
+        ["S/B ratio", "Signal-to-Blank ratio. Якщо blank-піка немає, результат — 'blank не виявлено', а не порожньо."],
+        ["Ширина корзини", "Допуск replicate RT. Розкид RT сурогата підказує значення (рекомендаційно) для введення в Конфігурацію аналізатора."],
+        ["Режим RT-only", "Робота без m/z (та опціонально без полярності) — зіставлення реплікатів і blank лише за часом утримання."],
         ["Confidence score", "Узагальнений показник довіри до піка."],
     ];
 
@@ -233,6 +250,7 @@
             <p class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Зміст</p>
             <div class="grid gap-2 text-sm text-blue-700 dark:text-blue-400 sm:grid-cols-2">
                 <a href="#input" class="hover:underline">1. Вхідні дані</a>
+                <a href="#flexibility" class="hover:underline">⓿ Гнучкість аналізатора та термінологія (v0.9.0)</a>
                 <a href="#columns" class="hover:underline">2. Колонки Excel</a>
                 <a href="#marks" class="hover:underline">3. Мітки оператора</a>
                 <a href="#algorithm" class="hover:underline">4. Алгоритм (Інтерактивний посібник)</a>
@@ -279,6 +297,60 @@
             row[2] → опис
             row[3] → приклад значення (моноширинний)
         -->
+        <!-- ----------------------------------------------------------------->
+        <!-- Розділ: Гнучкість аналізатора та термінологія (v0.9.0)            -->
+        <!-- ----------------------------------------------------------------->
+        <section id="flexibility" class="mb-10 rounded-2xl border border-blue-200 bg-blue-50/40 p-6 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20">
+            <h2 class="mb-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">Гнучкість аналізатора та термінологія <span class="align-middle text-xs font-bold text-blue-700 dark:text-blue-400">v0.9.0</span></h2>
+            <p class="mb-5 text-sm leading-7 text-slate-600 dark:text-slate-400">Цей реліз робить конвеєр стійким до реальних вхідних даних — інші прилади, відсутні виміри та чисті blank — і уточнює екранну термінологію.</p>
+
+            <div class="space-y-5 text-sm leading-7 text-slate-600 dark:text-slate-400">
+                <div>
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100">1 · Формати вводу та профілі приладів</h3>
+                    <p>Прийнятні типи файлів: <strong>CSV, TSV, TXT, XLSX, XLS</strong>. Текст з роздільниками читається як таблиця; Excel додатково несе кольори заливки клітинок як мітки оператора. Щоб підключити прилад з іншими заголовками експорту, оберіть <strong>профіль приладу</strong> в панелі імпорту — він зіставляє заголовки приладу (наприклад, <span class="font-mono">RetentionTime → RT</span>, <span class="font-mono">PeakArea → Area</span>) з канонічними полями і може оголосити <span class="font-mono">Base Peak</span> / <span class="font-mono">Polarity</span> відсутніми. Набір зразків формується у workspace з одного або кількох файлів, кожен додає свої рядки.</p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100">2 · Опціональні Polarity / Base Peak (RT-only)</h3>
+                    <p>Алгоритм тепер працює без <span class="font-mono">Polarity</span> (усі рядки утворюють одну групу <span class="font-mono">n/a</span> замість розбиття за полярністю) і без <span class="font-mono">Polarity</span> та <span class="font-mono">Base Peak</span> одночасно (RT-only — реплікати й blank зіставляються лише за часом утримання). Коли m/z відсутній у всьому наборі, штраф довіри за відсутність m/z не застосовується, бо це властивість формату даних, а не слабкість зіставлення.</p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100">3 · Signal-to-Blank без корзини blank</h3>
+                    <p>Коли у піка зразка немає зіставленої корзини blank, поле більше не лишається порожнім. У <span class="font-mono">Why.BlankState</span> повідомляються три стани: <span class="font-mono">blank_subtracted</span> (blank зіставлено й віднято), <span class="font-mono">blank_clean_here</span> (blank є, але чистий на цьому RT) та <span class="font-mono">no_blank_loaded</span> (blank узагалі не завантажено — наприклад, був настільки чистий, що оператор нічого не виявив). Останні два лишаються <strong>Real Compound</strong> — чистий blank читається як сильний результат, а не як відсутній.</p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100">4 · Ширина корзини кластера за сурогатом</h3>
+                    <p>Спостережувана поведінка RT сурогата підказує допуск replicate RT («ширину корзини»). Відкривши аудит сурогата, ви побачите <span class="font-mono">Why.BinWidthSuggestion</span> з трьома рекомендаційними метриками — <span class="font-mono">MaxAbsRtShift</span>, <span class="font-mono">KStdevRt</span> (k·σ, k=3) та <span class="font-mono">RangeRt</span> — кожна з кількістю реплікатів. Нічого не застосовується автоматично; оператор вводить значення в Конфігурацію аналізатора вручну.</p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100">5 · Термінологія: RSD = CV%, Реплікат = хроматограма</h3>
+                    <p><strong>CV% — це RSD</strong> (відносне стандартне відхилення, σ/середнє·100) — та сама величина; UI тепер позначає її <span class="font-mono">RSD (CV%)</span>, значення не змінюється. <strong>1 реплікат = 1 хроматограма</strong>, відображається як «Реплікати (хроматограми)».</p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-slate-900 dark:text-slate-100">6 · Підсвічування походження реплікатів</h3>
+                    <p>Кількість реплікатів візуально виділена; при наведенні показується походження кожного реплікату — вихідні файли та, якщо кластер зібрано з паралельних зразків, які зразки він охоплює (бурштинове кільце позначає змішане походження).</p>
+                </div>
+            </div>
+
+            <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 dark:bg-slate-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Формат</th>
+                            <th class="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Примітки</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                        {#each inputFormats as row}
+                            <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-700/40">
+                                <td class="px-4 py-3 font-mono font-semibold text-blue-700 dark:text-blue-400">{row[0]}</td>
+                                <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{row[1]}</td>
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <section id="columns" class="mb-10">
             <h2 class="mb-4 text-2xl font-semibold text-slate-900 dark:text-slate-50">2. Обов'язкові колонки Excel</h2>
             <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">

@@ -100,7 +100,7 @@ export const ruMessages = {
     confirmedPeaks: "Подтверждённые пики",
     displayedPeaks: "Показанные пики",
     ofTotal: "из {total} всего",
-    meanCv: "Средний CV%",
+    meanCv: "Средний RSD (CV%)",
     meanConfidence: "Среднее доверие",
     qcSummary: "QC-сводка",
     qcSummaryDesc:
@@ -139,6 +139,11 @@ export const ruMessages = {
         "Сортировка по умолчанию отдаёт приоритет наивысшему доверию",
     areaMean: "Средняя Area",
     replicates: "Репликаты",
+    replicatesChromatograms: "Репликаты (хроматограммы)",
+    parallelSources: "Источники",
+    rsdCv: "RSD (CV%)",
+    rsdCvHint:
+        "Относительное стандартное отклонение площадей репликатов — та же величина, что ранее обозначалась как CV%.",
     marks: "Метки",
     audit: "Аудит",
     noColor: "Без цвета",
@@ -170,6 +175,10 @@ export const ruMessages = {
     labspaceReportDeleted: "Отчёт удалён.",
     labspaceLoading: "Загрузка LabSpace...",
     labspaceLoadFailed: "Не удалось загрузить состояние LabSpace.",
+    labspaceInstrumentProfile: "Профиль прибора",
+    labspaceBinWidthHint:
+        "Подсказка: откройте аудит суррогата (BinWidthSuggestion) — max|сдвиг RT|, k·σ и размах помогут задать это значение.",
+    labspaceAcceptedFormats: "Принимается: CSV, TSV, TXT, XLSX, XLS",
     labspaceRunEyebrow: "Запуск",
     labspaceWorkspaceSettings: "Настройки пространства",
     labspaceRunTitle: "Запуск лабораторного скрининга",
