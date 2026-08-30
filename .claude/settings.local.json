@@ -30,7 +30,12 @@
       "Bash(bun install *)",
       "Bash(cargo build *)",
       "Bash(python3 -c ' *)",
-      "Bash(python3 -c \"import json; data = json.load\\(open\\('/Users/vkey/Documents/_/l-screening/tests/_wasm_output.json'\\)\\); confirmed = data.get\\('confirmed', []\\); print\\(f'Total confirmed rows: {len\\(confirmed\\)}'\\); print\\(f'Input rows in test: ~100'\\)\")"
+      "Bash(python3 -c \"import json; data = json.load\\(open\\('/Users/vkey/Documents/_/l-screening/tests/_wasm_output.json'\\)\\); confirmed = data.get\\('confirmed', []\\); print\\(f'Total confirmed rows: {len\\(confirmed\\)}'\\); print\\(f'Input rows in test: ~100'\\)\")",
+      "WebFetch(domain:docs.aireadi.org)",
+      "WebFetch(domain:pmc.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:github.com)",
+      "Bash(zip -r blood-test-data.zip blood-test-data/)",
+      "Bash(unzip -l /Users/vkey/Documents/_/l-screening/blood-test-data.zip)"
     ]
   }
 }
